@@ -500,18 +500,18 @@ function fmtDuration(mins) {
 }
 
 // ── Graceful shutdown ─────────────────────────────────────────────────────────
-process.on('SIGINT',  () => { db.close(); console.log('\n[DB] Closed.'); process.exit(0); });
-process.on('SIGTERM', () => { db.close(); process.exit(0); });
+function shutdown() { try { db.close(); } catch(_){} console.log('\n[DB] Closed.'); process.exit(0); }
+process.on('SIGINT',  shutdown);
+process.on('SIGTERM', shutdown);
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 loadCamerasFromDB();
 loadActiveIntoCache();
 
-const PORT = process.env.PORT || CONFIG.port;
+const PORT = parseInt(process.env.PORT || CONFIG.port, 10);
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🚗  LPR Dwell Tracker`);
-  console.log(`    Dashboard:  http://localhost:${CONFIG.port}`);
-  console.log(`    Webhook:    POST http://localhost:${CONFIG.port}/webhook/lpr`);
+  console.log(`    Listening:  0.0.0.0:${PORT}`);
   console.log(`    Database:   ${CONFIG.dbPath}`);
   console.log(`    Cameras:    ${Object.keys(CONFIG.cameras).length} configured`);
   console.log(`    Active:     ${activeCache.size} session(s) resumed\n`);
