@@ -507,7 +507,8 @@ process.on('SIGTERM', () => { db.close(); process.exit(0); });
 loadCamerasFromDB();
 loadActiveIntoCache();
 
-app.listen(CONFIG.port, () => {
+const PORT = process.env.PORT || CONFIG.port;
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🚗  LPR Dwell Tracker`);
   console.log(`    Dashboard:  http://localhost:${CONFIG.port}`);
   console.log(`    Webhook:    POST http://localhost:${CONFIG.port}/webhook/lpr`);
