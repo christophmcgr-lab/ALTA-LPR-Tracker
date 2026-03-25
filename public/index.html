@@ -134,9 +134,9 @@ tr.slide-in td { animation: slidein .3s ease-out; }
 .rcard-body  { padding: 0; overflow-x: auto; }
 .report-stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 16px; flex-shrink: 0; }
 .range-btns { display: flex; gap: 4px; }
-.range-btn { padding: 3px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; border: 1px solid var(--border2); background: transparent; color: var(--text2); font-family: var(--mono); transition: all .15s; }
-.range-btn:hover { color: var(--text); }
-.range-btn.active { background: var(--blue-bg); color: var(--blue); border-color: var(--blue-b); }
+.range-btn { padding: 4px 11px; border-radius: 4px; font-size: 11px; font-weight: 500; cursor: pointer; border: 1px solid var(--border2); background: var(--bg3); color: var(--text2); font-family: var(--mono); transition: all .15s; }
+.range-btn:hover { background: var(--bg4); color: var(--text); border-color: var(--border2); }
+.range-btn.active { background: var(--blue-bg); color: var(--blue); border-color: var(--blue-b); font-weight: 600; }
 
 /* Bar chart */
 .bar-chart { padding: 14px; display: flex; flex-direction: column; gap: 6px; }
@@ -240,9 +240,17 @@ select.role-sel { padding: 4px 6px; background: var(--bg4); border: 1px solid va
         <div class="stat"><div class="stat-lbl">Completed</div><div class="stat-val green" id="s-done">0</div></div>
       </div>
       <div class="tcard">
-        <div class="tcard-head">
-          <span class="tcard-title">Sessions</span>
-          <button class="btn" onclick="exportCSV()">Export CSV</button>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);flex-shrink:0;">
+          <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text2);">Sessions</span>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <div id="live-range-btns" style="display:flex;gap:4px;">
+              <button onclick="setLiveRange('today',this)"   style="padding:4px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid #2563eb;background:#eff6ff;color:#2563eb;font-family:var(--mono);">Today</button>
+              <button onclick="setLiveRange('7days',this)"   style="padding:4px 10px;border-radius:4px;font-size:11px;font-weight:500;cursor:pointer;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);font-family:var(--mono);">7 Days</button>
+              <button onclick="setLiveRange('30days',this)"  style="padding:4px 10px;border-radius:4px;font-size:11px;font-weight:500;cursor:pointer;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);font-family:var(--mono);">30 Days</button>
+              <button onclick="setLiveRange('all',this)"     style="padding:4px 10px;border-radius:4px;font-size:11px;font-weight:500;cursor:pointer;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);font-family:var(--mono);">All</button>
+            </div>
+            <button class="btn" onclick="exportCSV()">Export CSV</button>
+          </div>
         </div>
         <div class="tcard-body" id="table-wrap">
           <div class="empty"><div class="empty-icon">🚗</div>Waiting for events from Alta…</div>
@@ -264,13 +272,25 @@ select.role-sel { padding: 4px 6px; background: var(--bg4); border: 1px solid va
       </div>
 
       <!-- Alert log -->
-      <div style="flex:1;display:flex;flex-direction:column;min-height:0;">
+      <div style="display:flex;flex-direction:column;min-height:0;max-height:220px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
           <span class="sec-title" style="margin:0">Alert log</span>
           <button class="btn" onclick="clearAlerts()" style="font-size:11px;padding:2px 7px;">Clear</button>
         </div>
         <div id="alert-log" style="overflow-y:auto;flex:1;">
-          <div class="empty" style="padding:16px 0;">No alerts</div>
+          <div class="empty" style="padding:12px 0;">No alerts</div>
+        </div>
+      </div>
+
+      <!-- Raw webhook log -->
+      <div style="flex:1;display:flex;flex-direction:column;min-height:0;border-top:1px solid var(--border);padding-top:12px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <span class="sec-title" style="margin:0">Raw webhook events</span>
+          <button class="btn" onclick="clearRawLog()" style="font-size:11px;padding:2px 7px;">Clear</button>
+        </div>
+        <div style="font-size:10px;color:var(--text3);margin-bottom:6px;">Every event Alta sends appears here instantly, even if the camera isn't matched yet.</div>
+        <div id="raw-log" style="overflow-y:auto;flex:1;">
+          <div class="empty" style="padding:12px 0;font-size:11px;">Waiting for webhooks from Alta…</div>
         </div>
       </div>
     </div>
@@ -440,6 +460,7 @@ select.role-sel { padding: 4px 6px; background: var(--bg4); border: 1px solid va
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
 let sessions = {}, cameras = {}, maxDwell = 60, alerts = [];
+let liveRange = 'today'; // 'today' | '7days' | '30days' | 'all'
 let altaConnected = false;
 let reportRange = '7 days';
 let discoveredCameras = []; // from Alta API
@@ -504,6 +525,11 @@ function connect() {
 
   es.addEventListener('tick', () => renderTable());
 
+  es.addEventListener('webhook_raw', e => {
+    const d = JSON.parse(e.data);
+    pushRawLog(d.body);
+  });
+
   es.onopen  = () => { badge.className = 'conn-badge on'; badge.textContent = 'LIVE'; };
   es.onerror = () => { badge.className = 'conn-badge off'; badge.textContent = 'RECONNECTING…'; };
 }
@@ -511,14 +537,50 @@ function connect() {
 // ── Render: Live table ────────────────────────────────────────────────────────
 function renderAll() { renderTable(); renderStats(); renderCamerasConfigured(); updateSimCameras(); }
 
+function setLiveRange(range, btn) {
+  liveRange = range;
+  // Reset all filter buttons to inactive style
+  document.querySelectorAll('#live-range-btns button').forEach(b => {
+    b.style.background = 'var(--bg3)';
+    b.style.color = 'var(--text2)';
+    b.style.borderColor = 'var(--border2)';
+    b.style.fontWeight = '500';
+  });
+  // Highlight active button
+  btn.style.background = '#eff6ff';
+  btn.style.color = '#2563eb';
+  btn.style.borderColor = '#2563eb';
+  btn.style.fontWeight = '600';
+  renderTable();
+  renderStats();
+}
+
+function filterSessionsByRange(allSessions) {
+  const now = new Date();
+  return allSessions.filter(s => {
+    const t = s.entryTime ? new Date(s.entryTime) : (s.exitTime ? new Date(s.exitTime) : null);
+    if (!t) return liveRange === 'all';
+    if (liveRange === 'today') {
+      return t.toDateString() === now.toDateString();
+    } else if (liveRange === '7days') {
+      return (now - t) <= 7 * 24 * 60 * 60 * 1000;
+    } else if (liveRange === '30days') {
+      return (now - t) <= 30 * 24 * 60 * 60 * 1000;
+    }
+    return true; // 'all'
+  });
+}
+
 function renderTable() {
   const wrap = document.getElementById('table-wrap');
-  const rows = Object.values(sessions).sort((a,b) => {
+  const filtered = filterSessionsByRange(Object.values(sessions));
+  const rows = filtered.sort((a,b) => {
     const o = {violation:0,warning:1,active:2,complete:3};
     if (o[a.status] !== o[b.status]) return o[a.status]-o[b.status];
     return new Date(b.entryTime||0) - new Date(a.entryTime||0);
   });
-  if (!rows.length) { wrap.innerHTML = '<div class="empty"><div class="empty-icon">🚗</div>Waiting for events…</div>'; return; }
+  const rangeLabel = {today:'today',    '7days':'the last 7 days', '30days':'the last 30 days', all:'any time'}[liveRange];
+  if (!rows.length) { wrap.innerHTML = `<div class="empty"><div class="empty-icon">🚗</div>No sessions for ${rangeLabel}.</div>`; return; }
   const now = Date.now();
   const tbody = rows.map(s => {
     const mins = s.status === 'complete'
@@ -540,11 +602,14 @@ function renderTable() {
 }
 
 function renderStats() {
-  const v = Object.values(sessions);
-  document.getElementById('s-active').textContent = v.filter(s=>s.status==='active').length;
-  document.getElementById('s-warn').textContent   = v.filter(s=>s.status==='warning').length;
-  document.getElementById('s-viol').textContent   = v.filter(s=>s.status==='violation').length;
-  document.getElementById('s-done').textContent   = v.filter(s=>s.status==='complete').length;
+  // Active/warning/violation counts always show live totals regardless of filter
+  const all = Object.values(sessions);
+  document.getElementById('s-active').textContent = all.filter(s=>s.status==='active').length;
+  document.getElementById('s-warn').textContent   = all.filter(s=>s.status==='warning').length;
+  document.getElementById('s-viol').textContent   = all.filter(s=>s.status==='violation').length;
+  // Completed count respects the time filter
+  const filtered = filterSessionsByRange(all);
+  document.getElementById('s-done').textContent   = filtered.filter(s=>s.status==='complete').length;
 }
 
 function flashRow(plate) {
@@ -563,6 +628,44 @@ function pushAlert(type, msg) {
   log.innerHTML = alerts.map(a => `<div class="alert-item ${a.type}"><div class="alert-msg">${a.msg}</div><div class="alert-time">${fmtTime(a.time)}</div></div>`).join('');
 }
 function clearAlerts() { alerts = []; document.getElementById('alert-log').innerHTML = '<div class="empty" style="padding:12px 0;">No alerts</div>'; }
+
+// ── Raw webhook log ───────────────────────────────────────────────────────────
+let rawEvents = [];
+function pushRawLog(body) {
+  rawEvents.unshift({ ts: new Date(), body });
+  if (rawEvents.length > 20) rawEvents.pop();
+  renderRawLog();
+}
+function clearRawLog() {
+  rawEvents = [];
+  document.getElementById('raw-log').innerHTML = '<div class="empty" style="padding:12px 0;font-size:11px;">Waiting for webhooks from Alta…</div>';
+}
+function renderRawLog() {
+  const el = document.getElementById('raw-log');
+  if (!rawEvents.length) return;
+  el.innerHTML = rawEvents.map(e => {
+    const b = e.body;
+    const plate = b.lpr?.plate || b.plate || b.plate_number || '?';
+    const cam   = b.camera?.name || b.camera_id || b.device_id || '?';
+    const ok    = plate !== '?';
+    return `<div style="padding:7px 8px;border-radius:5px;margin-bottom:5px;background:${ok ? 'var(--green-bg)' : 'var(--amber-bg)'};border-left:2px solid ${ok ? 'var(--green)' : 'var(--amber)'}">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">
+        <span style="font-family:var(--mono);font-size:12px;font-weight:600;">${plate}</span>
+        <span style="font-size:10px;color:var(--text2);">${e.ts.toLocaleTimeString()}</span>
+      </div>
+      <div style="font-size:10px;color:var(--text2);margin-top:2px;">cam: ${cam}</div>
+      <details style="margin-top:4px;">
+        <summary style="font-size:10px;color:var(--text3);cursor:pointer;">raw JSON</summary>
+        <pre style="font-size:9px;color:var(--text2);white-space:pre-wrap;word-break:break-all;margin-top:4px;max-height:100px;overflow-y:auto;">${JSON.stringify(b, null, 2)}</pre>
+      </details>
+    </div>`;
+  }).join('');
+}
+
+// Load existing raw events from server on page load
+fetch('/webhook/debug').then(r => r.json()).then(events => {
+  events.forEach(e => pushRawLog(e.body));
+}).catch(() => {});
 
 // ── Reports ───────────────────────────────────────────────────────────────────
 function setRange(range, btn) {
