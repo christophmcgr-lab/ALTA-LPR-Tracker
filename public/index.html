@@ -937,7 +937,45 @@ function exportCSV() {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function fmtTime(d) { if (!d) return '—'; return new Date(d).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+function fmtTime(d) {
+  if (!d) return '—';
+  // If the string has a timezone offset (e.g. +11:00) display in that timezone,
+  // so Sydney events show Sydney time regardless of where the browser is.
+  const offsetMatch = typeof d === 'string' && d.match(/([+-])(\d{2}):(\d{2})$/);
+  if (offsetMatch) {
+    const sign = offsetMatch[1] === '+' ? 1 : -1;
+    const offsetMins = sign * (parseInt(offsetMatch[2]) * 60 + parseInt(offsetMatch[3]));
+    const offsetHours = offsetMins / 60;
+    const tzName = `Etc/GMT${offsetHours <= 0 ? '+' : ''}${-offsetHours}`;
+    try {
+      return new Date(d).toLocaleTimeString('en-AU', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        timeZone: tzName, hour12: false,
+      });
+    } catch(_) {}
+  }
+  // Fallback — display as-is in browser local time
+  return new Date(d).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+}
+
+function fmtDateTime(d) {
+  if (!d) return '—';
+  const offsetMatch = typeof d === 'string' && d.match(/([+-])(\d{2}):(\d{2})$/);
+  if (offsetMatch) {
+    const sign = offsetMatch[1] === '+' ? 1 : -1;
+    const offsetMins = sign * (parseInt(offsetMatch[2]) * 60 + parseInt(offsetMatch[3]));
+    const offsetHours = offsetMins / 60;
+    const tzName = `Etc/GMT${offsetHours <= 0 ? '+' : ''}${-offsetHours}`;
+    try {
+      return new Date(d).toLocaleString('en-AU', {
+        day: '2-digit', month: '2-digit', year: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        timeZone: tzName, hour12: false,
+      });
+    } catch(_) {}
+  }
+  return new Date(d).toLocaleString('en-AU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+}
 function fmtDur(mins) { const m=Math.abs(Math.round(mins)); return m>=60?`${Math.floor(m/60)}h${m%60}m`:`${m}m`; }
 
 // Populate webhook URL from current page location
