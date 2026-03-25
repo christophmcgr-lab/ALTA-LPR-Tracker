@@ -192,8 +192,9 @@ function rowToSession(row) {
 function sessionToRow(s) {
   return {
     plate: s.plate,
-    entry_time:  s.entryTime  ? s.entryTime.toISOString()  : null,
-    exit_time:   s.exitTime   ? s.exitTime.toISOString()   : null,
+    // Store as ISO string with UTC offset so the original local time is preserved
+    entry_time:  s.entryTime  ? toLocalISO(s.entryTime, s._entryTzOffset)  : null,
+    exit_time:   s.exitTime   ? toLocalISO(s.exitTime,  s._exitTzOffset)   : null,
     entry_camera: s.entryCamera || null,
     exit_camera:  s.exitCamera  || null,
     status: s.status,
@@ -201,11 +202,25 @@ function sessionToRow(s) {
     alerted_violation: s.alertedViolation ? 1 : 0,
   };
 }
+
+// Serialise a Date to ISO string using the original timezone offset (minutes).
+// Falls back to the Date's UTC value if no offset supplied.
+// e.g. toLocalISO(d, 660) → "2026-03-26T09:10:33+11:00"
+function toLocalISO(date, tzOffsetMinutes) {
+  if (tzOffsetMinutes == null) return date.toISOString();
+  const sign   = tzOffsetMinutes >= 0 ? '+' : '-';
+  const abs    = Math.abs(tzOffsetMinutes);
+  const hh     = String(Math.floor(abs / 60)).padStart(2, '0');
+  const mm     = String(abs % 60).padStart(2, '0');
+  // Shift the date by the offset to get local time digits
+  const local  = new Date(date.getTime() + tzOffsetMinutes * 60000);
+  return local.toISOString().replace('Z', `${sign}${hh}:${mm}`);
+}
 function sessionForWire(s) {
   return {
     ...s,
-    entryTime:    s.entryTime  ? s.entryTime.toISOString()  : null,
-    exitTime:     s.exitTime   ? s.exitTime.toISOString()   : null,
+    entryTime:    s.entryTime  ? toLocalISO(s.entryTime, s._entryTzOffset)  : null,
+    exitTime:     s.exitTime   ? toLocalISO(s.exitTime,  s._exitTzOffset)   : null,
     dwellMinutes: dwellMinutes(s),
   };
 }
@@ -289,50 +304,72 @@ app.post('/webhook/lpr', (req, res) => {
   res.json(result);
 });
 
-// Parse Alta's human-readable timestamp formats into a valid Date.
+// Parse Alta's human-readable timestamp formats into a { date, tzOffsetMinutes } object.
 // Alta sends formats like:
-//   "Thursday, March 26, 2026 09:10:33 AEDT"
-//   "Thursday, March 26, 2026 06:11:42 +08"
-//   "2026-03-26T09:10:33Z"  (standard ISO)
+//   "Thursday, March 26, 2026 09:10:33 AEDT"   → +11:00 = +660 min
+//   "Thursday, March 26, 2026 06:11:42 +08"     → +08:00 = +480 min
+//   "2026-03-26T09:10:33+11:00"                  → ISO with offset
 //   "N/A"
+const TZ_MAP = {
+  'AEDT': 660,  'AEST': 600,  'AWST': 480,
+  'SGT':  480,  'MYT':  480,  'WIB':  420,
+  'JST':  540,  'KST':  540,  'IST':  330,
+  'GMT':  0,    'UTC':  0,    'BST':  60,
+  'CET':  60,   'CEST': 120,  'EET':  120,
+  'EST':  -300, 'EDT':  -240, 'CST':  -360,
+  'CDT':  -300, 'MST':  -420, 'MDT':  -360,
+  'PST':  -480, 'PDT':  -420,
+};
+
 function parseAltaTime(raw) {
-  if (!raw || raw === 'N/A' || raw.trim() === '') return new Date();
+  if (!raw || raw === 'N/A' || raw.trim() === '') return { date: new Date(), tzOffsetMinutes: null };
 
-  // Already ISO — fast path
+  // ISO string with numeric offset e.g. "2026-03-26T09:10:33+11:00"
+  const isoOffsetMatch = raw.match(/([+-])(\d{2}):?(\d{2})$/);
   const iso = new Date(raw);
-  if (!isNaN(iso)) return iso;
+  if (!isNaN(iso) && isoOffsetMatch) {
+    const sign = isoOffsetMatch[1] === '+' ? 1 : -1;
+    const tzOffsetMinutes = sign * (parseInt(isoOffsetMatch[2]) * 60 + parseInt(isoOffsetMatch[3]));
+    return { date: iso, tzOffsetMinutes };
+  }
+  if (!isNaN(iso)) return { date: iso, tzOffsetMinutes: null };
 
-  // Strip weekday prefix: "Thursday, March 26, 2026 09:10:33 AEDT"
-  // → "March 26, 2026 09:10:33 AEDT"
+  // Strip weekday prefix: "Thursday, March 26, 2026 09:10:33 AEDT" → "March 26, 2026 09:10:33 AEDT"
   const stripped = raw.replace(/^[A-Za-z]+,\s*/, '');
 
-  // Replace named timezone abbreviations with UTC offset equivalents
-  // (JS Date() can't parse AEDT, AEST, SGT etc. natively)
-  const tzMap = {
-    'AEDT': '+11', 'AEST': '+10', 'AWST': '+08',
-    'SGT':  '+08', 'MYT':  '+08', 'WIB':  '+07',
-    'JST':  '+09', 'KST':  '+09', 'IST':  '+05:30',
-    'GMT':  '+00', 'UTC':  '+00', 'BST':  '+01',
-    'CET':  '+01', 'CEST': '+02', 'EET':  '+02',
-    'EST':  '-05', 'EDT':  '-04', 'CST':  '-06',
-    'CDT':  '-05', 'MST':  '-07', 'MDT':  '-06',
-    'PST':  '-08', 'PDT':  '-07',
-  };
+  // Check for named TZ abbreviation at end
+  const namedTzMatch = stripped.match(/\s+([A-Z]{2,5})$/);
+  let tzOffsetMinutes = null;
   let normalised = stripped;
-  for (const [abbr, offset] of Object.entries(tzMap)) {
-    normalised = normalised.replace(new RegExp(`\\b${abbr}\\b`), offset);
+
+  if (namedTzMatch && TZ_MAP[namedTzMatch[1]] !== undefined) {
+    tzOffsetMinutes = TZ_MAP[namedTzMatch[1]];
+    const offsetStr = (tzOffsetMinutes >= 0 ? '+' : '-') +
+      String(Math.floor(Math.abs(tzOffsetMinutes) / 60)).padStart(2, '0') + ':' +
+      String(Math.abs(tzOffsetMinutes) % 60).padStart(2, '0');
+    normalised = stripped.replace(/\s+[A-Z]{2,5}$/, offsetStr);
+  } else {
+    // Numeric offset e.g. "+08" or "+08:00" at end
+    const numTzMatch = stripped.match(/\s+([+-]\d{2}:?\d{0,2})$/);
+    if (numTzMatch) {
+      const parts = numTzMatch[1].replace(':', '').match(/([+-])(\d{2})(\d{0,2})/);
+      if (parts) {
+        const sign = parts[1] === '+' ? 1 : -1;
+        tzOffsetMinutes = sign * (parseInt(parts[2]) * 60 + (parseInt(parts[3] || '0')));
+      }
+    }
   }
 
   const d = new Date(normalised);
-  if (!isNaN(d)) return d;
+  if (!isNaN(d)) return { date: d, tzOffsetMinutes };
 
-  // Last resort: strip timezone entirely and treat as local
-  const noTz = stripped.replace(/\s+[A-Z]{2,5}$/, '').replace(/\s+[+-]\d{2}(:?\d{2})?$/, '');
+  // Last resort: strip timezone entirely
+  const noTz = stripped.replace(/\s+[A-Z]{2,5}$/, '').replace(/\s+[+-]\d{2}:?\d{0,2}$/, '');
   const d2 = new Date(noTz);
-  if (!isNaN(d2)) return d2;
+  if (!isNaN(d2)) { console.warn(`[TIME] Stripped tz from: "${raw}"`); return { date: d2, tzOffsetMinutes: null }; }
 
-  console.warn(`[TIME] Could not parse timestamp: "${raw}" — using now`);
-  return new Date();
+  console.warn(`[TIME] Could not parse: "${raw}" — using now`);
+  return { date: new Date(), tzOffsetMinutes: null };
 }
 
 // Returns true for Alta placeholder "N/A" values
@@ -349,10 +386,12 @@ function normaliseAltaPayload(body) {
     }
     const camName = isNA(body.camera?.name) ? null : body.camera?.name;
     const camSite = isNA(body.camera?.site) ? null : body.camera?.site;
+    const parsedTime = parseAltaTime(body.time);
     return {
       plate:      body.lpr.plate,
       camera_id:  camName || camSite || 'unknown',
-      timestamp:  parseAltaTime(body.time),
+      timestamp:  parsedTime.date,
+      tzOffset:   parsedTime.tzOffsetMinutes,
       confidence: isNA(body.lpr.confidence) ? 1 : (parseFloat(body.lpr.confidence) || 1),
       meta: {
         eventType:    body.eventType,
@@ -366,18 +405,18 @@ function normaliseAltaPayload(body) {
   }
   // Shape 2: { event: 'lpr.read', plate, camera_id, timestamp }
   if (body.event === 'lpr.read' || body.event === 'lpr_read')
-    return { plate: body.plate, camera_id: body.camera_id, timestamp: parseAltaTime(body.timestamp), confidence: body.confidence };
+    const p2 = parseAltaTime(body.timestamp); return { plate: body.plate, camera_id: body.camera_id, timestamp: p2.date, tzOffset: p2.tzOffsetMinutes, confidence: body.confidence };
   // Shape 3: { type: 'LPR', data: { plate_number, device_id } }
   if (body.type === 'LPR' && body.data)
-    return { plate: body.data.plate_number, camera_id: body.data.device_id, timestamp: parseAltaTime(body.data.occurred_at) };
+    const p3 = parseAltaTime(body.data.occurred_at); return { plate: body.data.plate_number, camera_id: body.data.device_id, timestamp: p3.date, tzOffset: p3.tzOffsetMinutes };
   // Shape 4: flat { plate, camera_id }
   if (body.plate_number || body.plate)
-    return { plate: body.plate_number || body.plate, camera_id: body.camera_id || body.device_id, timestamp: parseAltaTime(body.timestamp) };
+    const p4 = parseAltaTime(body.timestamp); return { plate: body.plate_number || body.plate, camera_id: body.camera_id || body.device_id, timestamp: p4.date, tzOffset: p4.tzOffsetMinutes };
   return null;
 }
 
 // ── Core LPR processor ────────────────────────────────────────────────────────
-function processLPREvent({ plate, camera_id, timestamp, confidence = 1 }, rawJson = null) {
+function processLPREvent({ plate, camera_id, timestamp, tzOffset = null, confidence = 1 }, rawJson = null) {
   plate = (plate || '').toUpperCase().trim();
   if (!plate) return { ok: false, error: 'Missing plate' };
   // Match by exact ID first, then fall back to matching by label name (for Alta rule webhooks
@@ -394,9 +433,7 @@ function processLPREvent({ plate, camera_id, timestamp, confidence = 1 }, rawJso
     ? camera_id
     : Object.keys(CONFIG.cameras).find(k => CONFIG.cameras[k].label?.toLowerCase() === camera_id?.toLowerCase()) || camera_id;
 
-  // timestamp is already a Date from parseAltaTime() — guard against any edge cases
   const ts = (timestamp instanceof Date && !isNaN(timestamp)) ? timestamp : (timestamp ? new Date(timestamp) : new Date());
-  if (isNaN(ts)) { console.warn('[LPR] Bad timestamp, using now'); }
   stmts.insertEvent.run({ plate, camera_id: resolvedCameraId, role: cam.role, confidence, ts: ts.toISOString(), raw: rawJson });
 
   if (cam.role === 'entry') {
@@ -405,7 +442,7 @@ function processLPREvent({ plate, camera_id, timestamp, confidence = 1 }, rawJso
       console.log(`[LPR] ${plate} re-read at entry (already on site)`);
       push('lpr_read', { plate, role: 'entry', camera: cam.label, duplicate: true, ts: ts.toISOString() });
     } else {
-      const session = { plate, entryTime: ts, exitTime: null, entryCamera: resolvedCameraId, exitCamera: null, status: 'active', alertedWarning: false, alertedViolation: false };
+      const session = { plate, entryTime: ts, exitTime: null, entryCamera: resolvedCameraId, exitCamera: null, status: 'active', alertedWarning: false, alertedViolation: false, _entryTzOffset: tzOffset, _exitTzOffset: null };
       stmts.upsertSession.run(sessionToRow(session));
       activeCache.set(plate, session);
       console.log(`[LPR] ✅ ${plate} ENTERED via ${cam.label}`);
@@ -414,7 +451,7 @@ function processLPREvent({ plate, camera_id, timestamp, confidence = 1 }, rawJso
   } else if (cam.role === 'exit') {
     const session = activeCache.get(plate);
     if (session) {
-      session.exitTime = ts; session.exitCamera = resolvedCameraId; session.status = 'complete';
+      session.exitTime = ts; session.exitCamera = resolvedCameraId; session.status = 'complete'; session._exitTzOffset = tzOffset;
       stmts.upsertSession.run(sessionToRow(session));
       activeCache.delete(plate);
       const mins = dwellMinutes(session);
@@ -423,7 +460,7 @@ function processLPREvent({ plate, camera_id, timestamp, confidence = 1 }, rawJso
       push('session_update', sessionForWire(session));
       if (over) notify('violation', session);
     } else {
-      const session = { plate, entryTime: null, exitTime: ts, entryCamera: null, exitCamera: resolvedCameraId, status: 'complete', alertedWarning: false, alertedViolation: false };
+      const session = { plate, entryTime: null, exitTime: ts, entryCamera: null, exitCamera: resolvedCameraId, status: 'complete', alertedWarning: false, alertedViolation: false, _entryTzOffset: null, _exitTzOffset: tzOffset };
       stmts.upsertSession.run(sessionToRow(session));
       push('session_update', sessionForWire(session));
     }
