@@ -378,7 +378,10 @@ app.post('/alta/login', async (req, res) => {
   const { baseUrl, username, password } = req.body;
   if (!baseUrl || !username || !password) return res.status(400).json({ ok: false, error: 'baseUrl, username and password required' });
 
-  const url = `${baseUrl.replace(/\/$/, '')}/api/v1/dologin`;
+  const base = baseUrl.replace(/\/$/, '');
+  const url = `${base}/api/v1/dologin`;
+  console.log(`[ALTA] Login attempt → ${url}`);
+
   try {
     const r = await fetch(url, {
       method: 'POST',
@@ -387,20 +390,38 @@ app.post('/alta/login', async (req, res) => {
       redirect: 'manual',
     });
 
+    console.log(`[ALTA] dologin status: ${r.status}`);
+
+    // Alta returns 200 or 302 on success
     if (r.status !== 200 && r.status !== 302) {
-      return res.status(401).json({ ok: false, error: `Alta returned ${r.status}` });
+      let body = '';
+      try { body = await r.text(); } catch(_) {}
+      console.error(`[ALTA] Login failed: ${r.status} — ${body.slice(0, 200)}`);
+      return res.status(401).json({ ok: false, error: `Alta returned HTTP ${r.status}. Check your deployment URL and credentials.` });
     }
 
-    // Alta returns a Set-Cookie header; capture it for subsequent requests
-    const cookie = r.headers.get('set-cookie');
-    altaSession = { baseUrl: baseUrl.replace(/\/$/, ''), cookie, username, loggedIn: true };
+    // Capture ALL Set-Cookie headers — Alta may set multiple cookies
+    // Node fetch collapses them with commas; we need the raw values
+    const rawCookie = r.headers.get('set-cookie') || '';
+    console.log(`[ALTA] Raw Set-Cookie: ${rawCookie.slice(0, 200)}`);
 
-    console.log(`[ALTA] Logged in as ${username} @ ${altaSession.baseUrl}`);
-    push('alta_status', { loggedIn: true, baseUrl: altaSession.baseUrl, username });
-    res.json({ ok: true, username, baseUrl: altaSession.baseUrl });
+    // Extract just the name=value pairs (strip attributes like Path, HttpOnly, etc.)
+    const cookieHeader = rawCookie
+      .split(/,(?=[^ ]+?=)/)           // split multiple cookies on comma NOT inside a value
+      .map(c => c.split(';')[0].trim()) // keep only name=value part
+      .join('; ');
+
+    if (!cookieHeader) {
+      console.error('[ALTA] No cookie in response — login may have succeeded but no session established');
+    }
+
+    altaSession = { baseUrl: base, cookie: cookieHeader, username, loggedIn: true };
+    console.log(`[ALTA] ✅ Logged in as ${username} @ ${base} | cookie: ${cookieHeader.slice(0, 60)}…`);
+    push('alta_status', { loggedIn: true, baseUrl: base, username });
+    res.json({ ok: true, username, baseUrl: base });
   } catch (e) {
     console.error('[ALTA] Login error:', e.message);
-    res.status(500).json({ ok: false, error: e.message });
+    res.status(500).json({ ok: false, error: `Connection failed: ${e.message}. Check the deployment URL is correct and reachable.` });
   }
 });
 
@@ -412,34 +433,52 @@ app.post('/alta/logout', (_req, res) => {
 
 // Proxy a GET to the Alta API, requires active session
 async function altaGet(path) {
-  if (!altaSession.loggedIn) throw new Error('Not logged in to Alta');
+  if (!altaSession.loggedIn) throw new Error('Not logged in to Alta — connect in Settings first');
   const url = `${altaSession.baseUrl}/api/v1${path}`;
-  const r = await fetch(url, { headers: { Cookie: altaSession.cookie || '' } });
-  if (r.status === 401) { altaSession.loggedIn = false; throw new Error('Alta session expired — please log in again'); }
-  if (!r.ok) throw new Error(`Alta API error: ${r.status}`);
+  console.log(`[ALTA] GET ${url}`);
+  const r = await fetch(url, {
+    headers: {
+      'Cookie': altaSession.cookie || '',
+      'Accept': 'application/json',
+    },
+  });
+  console.log(`[ALTA] GET ${path} → ${r.status}`);
+  if (r.status === 401) {
+    altaSession.loggedIn = false;
+    throw new Error('Alta session expired — please reconnect in Settings');
+  }
+  if (!r.ok) {
+    const body = await r.text().catch(() => '');
+    throw new Error(`Alta API ${path} returned ${r.status}: ${body.slice(0, 200)}`);
+  }
   return r.json();
 }
 
 // Discover cameras/devices from Alta
 app.get('/alta/cameras', async (_req, res) => {
   try {
-    // Alta exposes cameras under /api/v1/devices — filter by type where possible
     const data = await altaGet('/devices');
-    // Normalise: Alta returns an array, each device has id, name, type, location etc.
-    const devices = Array.isArray(data) ? data : (data.devices || data.items || []);
-    const cameras = devices
-      .filter(d => {
-        const t = (d.type || d.device_type || '').toLowerCase();
-        return !t || t.includes('camera') || t.includes('lpr') || t.includes('video');
-      })
-      .map(d => ({
-        id:       d.id   || d.guid || d.device_id,
-        name:     d.name || d.label || d.device_name || d.id,
-        type:     d.type || d.device_type || 'camera',
-        location: d.location || d.site || d.zone || '',
-        online:   d.online ?? d.connected ?? true,
-      }));
-    res.json({ ok: true, cameras });
+    console.log('[ALTA] /devices raw sample:', JSON.stringify(data).slice(0, 500));
+
+    // Normalise response — Alta may wrap the array or return it directly
+    const devices = Array.isArray(data) ? data : (data.devices || data.items || data.data || []);
+    console.log(`[ALTA] Found ${devices.length} device(s) total`);
+
+    // Show ALL devices in logs so we can see what fields/types are returned
+    devices.forEach((d, i) => {
+      if (i < 5) console.log(`[ALTA] device[${i}]:`, JSON.stringify(d).slice(0, 200));
+    });
+
+    // Return all devices — let the user pick which are LPR cameras
+    const cameras = devices.map(d => ({
+      id:       d.id   || d.guid || d.device_id || d.entityId || String(i),
+      name:     d.name || d.label || d.device_name || d.displayName || d.id || 'Unknown',
+      type:     d.type || d.device_type || d.deviceType || 'device',
+      location: d.location || d.site || d.site_name || d.zone || d.siteName || '',
+      online:   d.online ?? d.connected ?? d.isOnline ?? true,
+    }));
+
+    res.json({ ok: true, cameras, total: devices.length });
   } catch (e) {
     console.error('[ALTA] Camera fetch error:', e.message);
     res.status(500).json({ ok: false, error: e.message });
