@@ -404,14 +404,20 @@ function normaliseAltaPayload(body) {
     };
   }
   // Shape 2: { event: 'lpr.read', plate, camera_id, timestamp }
-  if (body.event === 'lpr.read' || body.event === 'lpr_read')
-    const p2 = parseAltaTime(body.timestamp); return { plate: body.plate, camera_id: body.camera_id, timestamp: p2.date, tzOffset: p2.tzOffsetMinutes, confidence: body.confidence };
+  if (body.event === 'lpr.read' || body.event === 'lpr_read') {
+    const p2 = parseAltaTime(body.timestamp);
+    return { plate: body.plate, camera_id: body.camera_id, timestamp: p2.date, tzOffset: p2.tzOffsetMinutes, confidence: body.confidence };
+  }
   // Shape 3: { type: 'LPR', data: { plate_number, device_id } }
-  if (body.type === 'LPR' && body.data)
-    const p3 = parseAltaTime(body.data.occurred_at); return { plate: body.data.plate_number, camera_id: body.data.device_id, timestamp: p3.date, tzOffset: p3.tzOffsetMinutes };
+  if (body.type === 'LPR' && body.data) {
+    const p3 = parseAltaTime(body.data.occurred_at);
+    return { plate: body.data.plate_number, camera_id: body.data.device_id, timestamp: p3.date, tzOffset: p3.tzOffsetMinutes };
+  }
   // Shape 4: flat { plate, camera_id }
-  if (body.plate_number || body.plate)
-    const p4 = parseAltaTime(body.timestamp); return { plate: body.plate_number || body.plate, camera_id: body.camera_id || body.device_id, timestamp: p4.date, tzOffset: p4.tzOffsetMinutes };
+  if (body.plate_number || body.plate) {
+    const p4 = parseAltaTime(body.timestamp);
+    return { plate: body.plate_number || body.plate, camera_id: body.camera_id || body.device_id, timestamp: p4.date, tzOffset: p4.tzOffsetMinutes };
+  }
   return null;
 }
 
