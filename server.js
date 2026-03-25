@@ -219,8 +219,10 @@ function toLocalISO(date, tzOffsetMinutes) {
 function sessionForWire(s) {
   return {
     ...s,
-    entryTime:    s.entryTime  ? toLocalISO(s.entryTime, s._entryTzOffset)  : null,
-    exitTime:     s.exitTime   ? toLocalISO(s.exitTime,  s._exitTzOffset)   : null,
+    // Send the original Alta time string to the browser so it displays in the local timezone
+    // Fall back to toLocalISO if no raw string available (e.g. for simulated events)
+    entryTime:    s._entryRawTime || (s.entryTime ? toLocalISO(s.entryTime, s._entryTzOffset) : null),
+    exitTime:     s._exitRawTime  || (s.exitTime  ? toLocalISO(s.exitTime,  s._exitTzOffset)  : null),
     dwellMinutes: dwellMinutes(s),
   };
 }
@@ -391,6 +393,7 @@ function normaliseAltaPayload(body) {
       plate:      body.lpr.plate,
       camera_id:  camName || camSite || 'unknown',
       timestamp:  parsedTime.date,
+      rawTime:    isNA(body.time) ? null : body.time,
       tzOffset:   parsedTime.tzOffsetMinutes,
       confidence: isNA(body.lpr.confidence) ? 1 : (parseFloat(body.lpr.confidence) || 1),
       meta: {
@@ -422,7 +425,7 @@ function normaliseAltaPayload(body) {
 }
 
 // ── Core LPR processor ────────────────────────────────────────────────────────
-function processLPREvent({ plate, camera_id, timestamp, tzOffset = null, confidence = 1 }, rawJson = null) {
+function processLPREvent({ plate, camera_id, timestamp, rawTime = null, tzOffset = null, confidence = 1 }, rawJson = null) {
   plate = (plate || '').toUpperCase().trim();
   if (!plate) return { ok: false, error: 'Missing plate' };
   // Match by exact ID first, then fall back to matching by label name (for Alta rule webhooks
@@ -448,7 +451,7 @@ function processLPREvent({ plate, camera_id, timestamp, tzOffset = null, confide
       console.log(`[LPR] ${plate} re-read at entry (already on site)`);
       push('lpr_read', { plate, role: 'entry', camera: cam.label, duplicate: true, ts: ts.toISOString() });
     } else {
-      const session = { plate, entryTime: ts, exitTime: null, entryCamera: resolvedCameraId, exitCamera: null, status: 'active', alertedWarning: false, alertedViolation: false, _entryTzOffset: tzOffset, _exitTzOffset: null };
+      const session = { plate, entryTime: ts, exitTime: null, entryCamera: resolvedCameraId, exitCamera: null, status: 'active', alertedWarning: false, alertedViolation: false, _entryTzOffset: tzOffset, _exitTzOffset: null, _entryRawTime: rawTime, _exitRawTime: null };
       stmts.upsertSession.run(sessionToRow(session));
       activeCache.set(plate, session);
       console.log(`[LPR] ✅ ${plate} ENTERED via ${cam.label}`);
@@ -457,7 +460,7 @@ function processLPREvent({ plate, camera_id, timestamp, tzOffset = null, confide
   } else if (cam.role === 'exit') {
     const session = activeCache.get(plate);
     if (session) {
-      session.exitTime = ts; session.exitCamera = resolvedCameraId; session.status = 'complete'; session._exitTzOffset = tzOffset;
+      session.exitTime = ts; session.exitCamera = resolvedCameraId; session.status = 'complete'; session._exitTzOffset = tzOffset; session._exitRawTime = rawTime;
       stmts.upsertSession.run(sessionToRow(session));
       activeCache.delete(plate);
       const mins = dwellMinutes(session);
@@ -466,7 +469,7 @@ function processLPREvent({ plate, camera_id, timestamp, tzOffset = null, confide
       push('session_update', sessionForWire(session));
       if (over) notify('violation', session);
     } else {
-      const session = { plate, entryTime: null, exitTime: ts, entryCamera: null, exitCamera: resolvedCameraId, status: 'complete', alertedWarning: false, alertedViolation: false, _entryTzOffset: null, _exitTzOffset: tzOffset };
+      const session = { plate, entryTime: null, exitTime: ts, entryCamera: null, exitCamera: resolvedCameraId, status: 'complete', alertedWarning: false, alertedViolation: false, _entryTzOffset: null, _exitTzOffset: tzOffset, _entryRawTime: null, _exitRawTime: rawTime };
       stmts.upsertSession.run(sessionToRow(session));
       push('session_update', sessionForWire(session));
     }
