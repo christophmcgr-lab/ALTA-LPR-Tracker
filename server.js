@@ -245,41 +245,121 @@ function getSnapshot() {
 }
 
 // ── Alta webhook ──────────────────────────────────────────────────────────────
+// Debug endpoint — see the last 20 raw payloads received
+const rawWebhookLog = [];
+app.get('/webhook/debug', (_req, res) => res.json(rawWebhookLog));
+
 app.post('/webhook/lpr', (req, res) => {
-  if (CONFIG.notifications.console) console.log('[ALTA WEBHOOK]', JSON.stringify(req.body));
+  const raw = JSON.stringify(req.body);
+
+  // Always log and store raw payload for debugging
+  console.log('[WEBHOOK] Received:', raw.slice(0, 500));
+  rawWebhookLog.unshift({ ts: new Date().toISOString(), body: req.body });
+  if (rawWebhookLog.length > 20) rawWebhookLog.pop();
+
+  // Push raw event to dashboard so it's visible immediately even if camera not matched
+  push('webhook_raw', { ts: new Date().toISOString(), body: req.body });
+
   const event = normaliseAltaPayload(req.body);
-  if (!event) return res.status(400).json({ error: 'Unrecognised payload shape' });
-  res.json(processLPREvent(event, JSON.stringify(req.body)));
+  if (!event) {
+    console.warn('[WEBHOOK] Unrecognised payload shape:', raw.slice(0, 200));
+    return res.status(400).json({ error: 'Unrecognised payload shape', received: req.body });
+  }
+  // Placeholder/test event — acknowledge but don't process
+  if (event._skip) {
+    return res.json({ ok: true, skipped: true, reason: 'Placeholder test event (N/A values)' });
+  }
+
+  console.log(`[WEBHOOK] Normalised → plate:${event.plate} camera_id:${event.camera_id} ts:${event.timestamp}`);
+  const result = processLPREvent(event, raw);
+  console.log('[WEBHOOK] Result:', JSON.stringify(result));
+  res.json(result);
 });
+
+// Parse Alta's human-readable timestamp formats into a valid Date.
+// Alta sends formats like:
+//   "Thursday, March 26, 2026 09:10:33 AEDT"
+//   "Thursday, March 26, 2026 06:11:42 +08"
+//   "2026-03-26T09:10:33Z"  (standard ISO)
+//   "N/A"
+function parseAltaTime(raw) {
+  if (!raw || raw === 'N/A' || raw.trim() === '') return new Date();
+
+  // Already ISO — fast path
+  const iso = new Date(raw);
+  if (!isNaN(iso)) return iso;
+
+  // Strip weekday prefix: "Thursday, March 26, 2026 09:10:33 AEDT"
+  // → "March 26, 2026 09:10:33 AEDT"
+  const stripped = raw.replace(/^[A-Za-z]+,\s*/, '');
+
+  // Replace named timezone abbreviations with UTC offset equivalents
+  // (JS Date() can't parse AEDT, AEST, SGT etc. natively)
+  const tzMap = {
+    'AEDT': '+11', 'AEST': '+10', 'AWST': '+08',
+    'SGT':  '+08', 'MYT':  '+08', 'WIB':  '+07',
+    'JST':  '+09', 'KST':  '+09', 'IST':  '+05:30',
+    'GMT':  '+00', 'UTC':  '+00', 'BST':  '+01',
+    'CET':  '+01', 'CEST': '+02', 'EET':  '+02',
+    'EST':  '-05', 'EDT':  '-04', 'CST':  '-06',
+    'CDT':  '-05', 'MST':  '-07', 'MDT':  '-06',
+    'PST':  '-08', 'PDT':  '-07',
+  };
+  let normalised = stripped;
+  for (const [abbr, offset] of Object.entries(tzMap)) {
+    normalised = normalised.replace(new RegExp(`\\b${abbr}\\b`), offset);
+  }
+
+  const d = new Date(normalised);
+  if (!isNaN(d)) return d;
+
+  // Last resort: strip timezone entirely and treat as local
+  const noTz = stripped.replace(/\s+[A-Z]{2,5}$/, '').replace(/\s+[+-]\d{2}(:?\d{2})?$/, '');
+  const d2 = new Date(noTz);
+  if (!isNaN(d2)) return d2;
+
+  console.warn(`[TIME] Could not parse timestamp: "${raw}" — using now`);
+  return new Date();
+}
+
+// Returns true for Alta placeholder "N/A" values
+function isNA(v) { return !v || String(v).trim().toUpperCase() === 'N/A'; }
 
 function normaliseAltaPayload(body) {
   // Shape 1: Alta rule/webhook format
   // { eventType, time, camera: { name, site }, lpr: { plate, confidence }, snapshotUrl }
   if (body.lpr && body.lpr.plate) {
+    // Reject test/placeholder events where Alta hasn't substituted real values yet
+    if (isNA(body.lpr.plate)) {
+      console.log('[WEBHOOK] Skipping placeholder/test event (plate is N/A)');
+      return { _skip: true };
+    }
+    const camName = isNA(body.camera?.name) ? null : body.camera?.name;
+    const camSite = isNA(body.camera?.site) ? null : body.camera?.site;
     return {
       plate:      body.lpr.plate,
-      camera_id:  body.camera?.name || body.camera?.site || 'unknown',
-      timestamp:  body.time || new Date().toISOString(),
-      confidence: parseFloat(body.lpr.confidence) || 1,
+      camera_id:  camName || camSite || 'unknown',
+      timestamp:  parseAltaTime(body.time),
+      confidence: isNA(body.lpr.confidence) ? 1 : (parseFloat(body.lpr.confidence) || 1),
       meta: {
         eventType:    body.eventType,
-        cameraName:   body.camera?.name,
-        site:         body.camera?.site,
-        vehicleColor: body.lpr.vehicleColor,
-        vehicleType:  body.lpr.vehicleType,
-        snapshotUrl:  body.snapshotUrl,
+        cameraName:   camName,
+        site:         camSite,
+        vehicleColor: isNA(body.lpr.vehicleColor) ? null : body.lpr.vehicleColor,
+        vehicleType:  isNA(body.lpr.vehicleType)  ? null : body.lpr.vehicleType,
+        snapshotUrl:  isNA(body.snapshotUrl)       ? null : body.snapshotUrl,
       },
     };
   }
   // Shape 2: { event: 'lpr.read', plate, camera_id, timestamp }
   if (body.event === 'lpr.read' || body.event === 'lpr_read')
-    return { plate: body.plate, camera_id: body.camera_id, timestamp: body.timestamp, confidence: body.confidence };
+    return { plate: body.plate, camera_id: body.camera_id, timestamp: parseAltaTime(body.timestamp), confidence: body.confidence };
   // Shape 3: { type: 'LPR', data: { plate_number, device_id } }
   if (body.type === 'LPR' && body.data)
-    return { plate: body.data.plate_number, camera_id: body.data.device_id, timestamp: body.data.occurred_at };
+    return { plate: body.data.plate_number, camera_id: body.data.device_id, timestamp: parseAltaTime(body.data.occurred_at) };
   // Shape 4: flat { plate, camera_id }
   if (body.plate_number || body.plate)
-    return { plate: body.plate_number || body.plate, camera_id: body.camera_id || body.device_id, timestamp: body.timestamp };
+    return { plate: body.plate_number || body.plate, camera_id: body.camera_id || body.device_id, timestamp: parseAltaTime(body.timestamp) };
   return null;
 }
 
@@ -301,7 +381,9 @@ function processLPREvent({ plate, camera_id, timestamp, confidence = 1 }, rawJso
     ? camera_id
     : Object.keys(CONFIG.cameras).find(k => CONFIG.cameras[k].label?.toLowerCase() === camera_id?.toLowerCase()) || camera_id;
 
-  const ts = timestamp ? new Date(timestamp) : new Date();
+  // timestamp is already a Date from parseAltaTime() — guard against any edge cases
+  const ts = (timestamp instanceof Date && !isNaN(timestamp)) ? timestamp : (timestamp ? new Date(timestamp) : new Date());
+  if (isNaN(ts)) { console.warn('[LPR] Bad timestamp, using now'); }
   stmts.insertEvent.run({ plate, camera_id: resolvedCameraId, role: cam.role, confidence, ts: ts.toISOString(), raw: rawJson });
 
   if (cam.role === 'entry') {
