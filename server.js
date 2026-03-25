@@ -253,10 +253,31 @@ app.post('/webhook/lpr', (req, res) => {
 });
 
 function normaliseAltaPayload(body) {
+  // Shape 1: Alta rule/webhook format
+  // { eventType, time, camera: { name, site }, lpr: { plate, confidence }, snapshotUrl }
+  if (body.lpr && body.lpr.plate) {
+    return {
+      plate:      body.lpr.plate,
+      camera_id:  body.camera?.name || body.camera?.site || 'unknown',
+      timestamp:  body.time || new Date().toISOString(),
+      confidence: parseFloat(body.lpr.confidence) || 1,
+      meta: {
+        eventType:    body.eventType,
+        cameraName:   body.camera?.name,
+        site:         body.camera?.site,
+        vehicleColor: body.lpr.vehicleColor,
+        vehicleType:  body.lpr.vehicleType,
+        snapshotUrl:  body.snapshotUrl,
+      },
+    };
+  }
+  // Shape 2: { event: 'lpr.read', plate, camera_id, timestamp }
   if (body.event === 'lpr.read' || body.event === 'lpr_read')
     return { plate: body.plate, camera_id: body.camera_id, timestamp: body.timestamp, confidence: body.confidence };
+  // Shape 3: { type: 'LPR', data: { plate_number, device_id } }
   if (body.type === 'LPR' && body.data)
     return { plate: body.data.plate_number, camera_id: body.data.device_id, timestamp: body.data.occurred_at };
+  // Shape 4: flat { plate, camera_id }
   if (body.plate_number || body.plate)
     return { plate: body.plate_number || body.plate, camera_id: body.camera_id || body.device_id, timestamp: body.timestamp };
   return null;
@@ -266,11 +287,22 @@ function normaliseAltaPayload(body) {
 function processLPREvent({ plate, camera_id, timestamp, confidence = 1 }, rawJson = null) {
   plate = (plate || '').toUpperCase().trim();
   if (!plate) return { ok: false, error: 'Missing plate' };
-  const cam = CONFIG.cameras[camera_id];
-  if (!cam) { console.warn(`[LPR] Unknown camera: ${camera_id}`); return { ok: false, error: `Unknown camera: ${camera_id}` }; }
+  // Match by exact ID first, then fall back to matching by label name (for Alta rule webhooks
+  // which send camera.name rather than a GUID)
+  const cam = CONFIG.cameras[camera_id]
+    || Object.values(CONFIG.cameras).find(c => c.label?.toLowerCase() === camera_id?.toLowerCase())
+    || null;
+  if (!cam) {
+    console.warn(`[LPR] Unknown camera: ${camera_id} — register it in Settings first`);
+    return { ok: false, error: `Unknown camera: ${camera_id}` };
+  }
+  // Resolve the canonical camera_id key for DB storage
+  const resolvedCameraId = CONFIG.cameras[camera_id]
+    ? camera_id
+    : Object.keys(CONFIG.cameras).find(k => CONFIG.cameras[k].label?.toLowerCase() === camera_id?.toLowerCase()) || camera_id;
 
   const ts = timestamp ? new Date(timestamp) : new Date();
-  stmts.insertEvent.run({ plate, camera_id, role: cam.role, confidence, ts: ts.toISOString(), raw: rawJson });
+  stmts.insertEvent.run({ plate, camera_id: resolvedCameraId, role: cam.role, confidence, ts: ts.toISOString(), raw: rawJson });
 
   if (cam.role === 'entry') {
     const existing = activeCache.get(plate);
@@ -278,7 +310,7 @@ function processLPREvent({ plate, camera_id, timestamp, confidence = 1 }, rawJso
       console.log(`[LPR] ${plate} re-read at entry (already on site)`);
       push('lpr_read', { plate, role: 'entry', camera: cam.label, duplicate: true, ts: ts.toISOString() });
     } else {
-      const session = { plate, entryTime: ts, exitTime: null, entryCamera: camera_id, exitCamera: null, status: 'active', alertedWarning: false, alertedViolation: false };
+      const session = { plate, entryTime: ts, exitTime: null, entryCamera: resolvedCameraId, exitCamera: null, status: 'active', alertedWarning: false, alertedViolation: false };
       stmts.upsertSession.run(sessionToRow(session));
       activeCache.set(plate, session);
       console.log(`[LPR] ✅ ${plate} ENTERED via ${cam.label}`);
@@ -287,7 +319,7 @@ function processLPREvent({ plate, camera_id, timestamp, confidence = 1 }, rawJso
   } else if (cam.role === 'exit') {
     const session = activeCache.get(plate);
     if (session) {
-      session.exitTime = ts; session.exitCamera = camera_id; session.status = 'complete';
+      session.exitTime = ts; session.exitCamera = resolvedCameraId; session.status = 'complete';
       stmts.upsertSession.run(sessionToRow(session));
       activeCache.delete(plate);
       const mins = dwellMinutes(session);
@@ -296,7 +328,7 @@ function processLPREvent({ plate, camera_id, timestamp, confidence = 1 }, rawJso
       push('session_update', sessionForWire(session));
       if (over) notify('violation', session);
     } else {
-      const session = { plate, entryTime: null, exitTime: ts, entryCamera: null, exitCamera: camera_id, status: 'complete', alertedWarning: false, alertedViolation: false };
+      const session = { plate, entryTime: null, exitTime: ts, entryCamera: null, exitCamera: resolvedCameraId, status: 'complete', alertedWarning: false, alertedViolation: false };
       stmts.upsertSession.run(sessionToRow(session));
       push('session_update', sessionForWire(session));
     }
