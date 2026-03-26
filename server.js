@@ -87,6 +87,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sessions_plate  ON sessions(plate);
   CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
 
+
   CREATE TABLE IF NOT EXISTS events (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     plate      TEXT NOT NULL,
@@ -115,17 +116,22 @@ db.exec(`
   );
 `);
 
+// Migrate existing DB — add snapshot_url column if not present (safe to run every boot)
+try { db.run('ALTER TABLE sessions ADD COLUMN snapshot_url TEXT'); } catch(_) {}
+
 // ── Prepared statements ───────────────────────────────────────────────────────
 const stmts = {
   upsertSession: db.prepare(`
     INSERT INTO sessions (plate, entry_time, exit_time, entry_camera, exit_camera,
-      status, alerted_warning, alerted_violation, updated_at)
+      status, alerted_warning, alerted_violation, snapshot_url, updated_at)
     VALUES (@plate, @entry_time, @exit_time, @entry_camera, @exit_camera,
-      @status, @alerted_warning, @alerted_violation, datetime('now'))
+      @status, @alerted_warning, @alerted_violation, @snapshot_url, datetime('now'))
     ON CONFLICT(plate, entry_time) DO UPDATE SET
       exit_time=excluded.exit_time, exit_camera=excluded.exit_camera,
       status=excluded.status, alerted_warning=excluded.alerted_warning,
-      alerted_violation=excluded.alerted_violation, updated_at=datetime('now')
+      alerted_violation=excluded.alerted_violation,
+      snapshot_url=COALESCE(excluded.snapshot_url, sessions.snapshot_url),
+      updated_at=datetime('now')
   `),
   getAllActive:    db.prepare(`SELECT * FROM sessions WHERE status IN ('active','warning','violation')`),
   getAllSessions:  db.prepare(`SELECT * FROM sessions ORDER BY COALESCE(entry_time, created_at) DESC LIMIT 500`),
@@ -187,6 +193,7 @@ function rowToSession(row) {
     status:           row.status,
     alertedWarning:   !!row.alerted_warning,
     alertedViolation: !!row.alerted_violation,
+    snapshotUrl:      row.snapshot_url || null,
   };
 }
 function sessionToRow(s) {
@@ -200,6 +207,7 @@ function sessionToRow(s) {
     status: s.status,
     alerted_warning:   s.alertedWarning   ? 1 : 0,
     alerted_violation: s.alertedViolation ? 1 : 0,
+    snapshot_url: s.snapshotUrl || null,
   };
 }
 
@@ -425,7 +433,7 @@ function normaliseAltaPayload(body) {
 }
 
 // ── Core LPR processor ────────────────────────────────────────────────────────
-function processLPREvent({ plate, camera_id, timestamp, rawTime = null, tzOffset = null, confidence = 1 }, rawJson = null) {
+function processLPREvent({ plate, camera_id, timestamp, rawTime = null, tzOffset = null, confidence = 1, meta = {} }, rawJson = null) {
   plate = (plate || '').toUpperCase().trim();
   if (!plate) return { ok: false, error: 'Missing plate' };
   // Match by exact ID first, then fall back to matching by label name (for Alta rule webhooks
@@ -473,7 +481,7 @@ function processLPREvent({ plate, camera_id, timestamp, rawTime = null, tzOffset
       console.log(`[LPR] ${plate} re-read at entry (already on site since ${existing.entryTime})`);
       push('lpr_read', { plate, role: 'entry', camera: cam.label, duplicate: true, ts: ts.toISOString() });
     } else {
-      const session = { plate, entryTime: ts, exitTime: null, entryCamera: resolvedCameraId, exitCamera: null, status: 'active', alertedWarning: false, alertedViolation: false, _entryTzOffset: tzOffset, _exitTzOffset: null, _entryRawTime: rawTime, _exitRawTime: null };
+      const session = { plate, entryTime: ts, exitTime: null, entryCamera: resolvedCameraId, exitCamera: null, status: 'active', alertedWarning: false, alertedViolation: false, _entryTzOffset: tzOffset, _exitTzOffset: null, _entryRawTime: rawTime, _exitRawTime: null, snapshotUrl: meta.snapshotUrl || null };
       stmts.upsertSession.run(sessionToRow(session));
       activeCache.set(plate, session);
       console.log(`[LPR] ✅ ${plate} ENTERED via ${cam.label}`);
@@ -482,7 +490,7 @@ function processLPREvent({ plate, camera_id, timestamp, rawTime = null, tzOffset
   } else if (effectiveRole === 'exit') {
     const session = activeCache.get(plate);
     if (session) {
-      session.exitTime = ts; session.exitCamera = resolvedCameraId; session.status = 'complete'; session._exitTzOffset = tzOffset; session._exitRawTime = rawTime;
+      session.exitTime = ts; session.exitCamera = resolvedCameraId; session.status = 'complete'; session._exitTzOffset = tzOffset; session._exitRawTime = rawTime; if (meta.snapshotUrl) session.snapshotUrl = meta.snapshotUrl;
       stmts.upsertSession.run(sessionToRow(session));
       activeCache.delete(plate);
       const mins = dwellMinutes(session);
@@ -492,7 +500,7 @@ function processLPREvent({ plate, camera_id, timestamp, rawTime = null, tzOffset
       if (over) notify('violation', session);
     } else {
       // Exit read with no matching entry — record it but mark entry as unknown
-      const session = { plate, entryTime: null, exitTime: ts, entryCamera: null, exitCamera: resolvedCameraId, status: 'complete', alertedWarning: false, alertedViolation: false, _entryTzOffset: null, _exitTzOffset: tzOffset, _entryRawTime: null, _exitRawTime: rawTime };
+      const session = { plate, entryTime: null, exitTime: ts, entryCamera: null, exitCamera: resolvedCameraId, status: 'complete', alertedWarning: false, alertedViolation: false, _entryTzOffset: null, _exitTzOffset: tzOffset, _entryRawTime: null, _exitRawTime: rawTime, snapshotUrl: meta.snapshotUrl || null };
       stmts.upsertSession.run(sessionToRow(session));
       console.log(`[LPR] ${plate} exited via ${cam.label} (no matching entry)`);
       push('session_update', sessionForWire(session));
