@@ -7,7 +7,50 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-:root {
+/* ── Theme: Alta Light (default) ── */
+:root, [data-theme="alta-light"] {
+  --bg:       #f0f4f7;
+  --bg2:      #ffffff;
+  --bg3:      #e8edf2;
+  --bg4:      #dde4eb;
+  --border:   rgba(0,40,80,0.10);
+  --border2:  rgba(0,40,80,0.18);
+  --text:     #0d1f2d;
+  --text2:    #4a6070;
+  --text3:    #8ca0ae;
+  --accent:   #00b5cc;
+  --green:    #00a878;  --green-bg:  rgba(0,168,120,0.08);   --green-b: rgba(0,168,120,0.22);
+  --amber:    #e09000;  --amber-bg:  rgba(224,144,0,0.09);   --amber-b: rgba(224,144,0,0.22);
+  --red:      #e03040;  --red-bg:    rgba(224,48,64,0.08);   --red-b:   rgba(224,48,64,0.22);
+  --blue:     #0077cc;  --blue-bg:   rgba(0,119,204,0.07);   --blue-b:  rgba(0,119,204,0.20);
+  --purple:   #7c3aed;  --purple-bg: rgba(124,58,237,0.07);  --purple-b:rgba(124,58,237,0.20);
+  --font: 'IBM Plex Sans', sans-serif;
+  --mono: 'IBM Plex Mono', monospace;
+}
+
+/* ── Theme: Alta Dark ── */
+[data-theme="alta-dark"] {
+  --bg:       #0d1920;
+  --bg2:      #112230;
+  --bg3:      #162c3a;
+  --bg4:      #1d3548;
+  --border:   rgba(0,181,204,0.12);
+  --border2:  rgba(0,181,204,0.22);
+  --text:     #e4f0f6;
+  --text2:    #7aafc4;
+  --text3:    #3d6878;
+  --accent:   #00b5cc;
+  --green:    #00d4a0;  --green-bg:  rgba(0,212,160,0.10);   --green-b: rgba(0,212,160,0.25);
+  --amber:    #ffa930;  --amber-bg:  rgba(255,169,48,0.10);  --amber-b: rgba(255,169,48,0.25);
+  --red:      #ff4d5e;  --red-bg:    rgba(255,77,94,0.10);   --red-b:   rgba(255,77,94,0.25);
+  --blue:     #00b5cc;  --blue-bg:   rgba(0,181,204,0.10);   --blue-b:  rgba(0,181,204,0.25);
+  --purple:   #a78bfa;  --purple-bg: rgba(167,139,250,0.10); --purple-b:rgba(167,139,250,0.25);
+  --font: 'IBM Plex Sans', sans-serif;
+  --mono: 'IBM Plex Mono', monospace;
+}
+
+/* ── Theme: Classic Light ── */
+[data-theme="classic-light"] {
   --bg:       #f5f5f4;
   --bg2:      #ffffff;
   --bg3:      #f0efee;
@@ -17,11 +60,33 @@
   --text:     #1a1a18;
   --text2:    #6b6b68;
   --text3:    #a8a8a5;
-  --green:    #16a34a;  --green-bg:  rgba(22,163,74,0.08);    --green-b: rgba(22,163,74,0.2);
-  --amber:    #d97706;  --amber-bg:  rgba(217,119,6,0.08);    --amber-b: rgba(217,119,6,0.2);
-  --red:      #dc2626;  --red-bg:    rgba(220,38,38,0.08);    --red-b:   rgba(220,38,38,0.2);
-  --blue:     #2563eb;  --blue-bg:   rgba(37,99,235,0.07);    --blue-b:  rgba(37,99,235,0.18);
-  --purple:   #9333ea;  --purple-bg: rgba(147,51,234,0.07);   --purple-b:rgba(147,51,234,0.18);
+  --accent:   #2563eb;
+  --green:    #16a34a;  --green-bg:  rgba(22,163,74,0.08);   --green-b: rgba(22,163,74,0.2);
+  --amber:    #d97706;  --amber-bg:  rgba(217,119,6,0.08);   --amber-b: rgba(217,119,6,0.2);
+  --red:      #dc2626;  --red-bg:    rgba(220,38,38,0.08);   --red-b:   rgba(220,38,38,0.2);
+  --blue:     #2563eb;  --blue-bg:   rgba(37,99,235,0.07);   --blue-b:  rgba(37,99,235,0.18);
+  --purple:   #9333ea;  --purple-bg: rgba(147,51,234,0.07);  --purple-b:rgba(147,51,234,0.18);
+  --font: 'IBM Plex Sans', sans-serif;
+  --mono: 'IBM Plex Mono', monospace;
+}
+
+/* ── Theme: Classic Dark ── */
+[data-theme="classic-dark"] {
+  --bg:       #0e0f11;
+  --bg2:      #161719;
+  --bg3:      #1d1f22;
+  --bg4:      #242628;
+  --border:   rgba(255,255,255,0.07);
+  --border2:  rgba(255,255,255,0.13);
+  --text:     #e8e8e6;
+  --text2:    #8a8a88;
+  --text3:    #4a4a48;
+  --accent:   #3b82f6;
+  --green:    #22c55e;  --green-bg:  rgba(34,197,94,0.10);   --green-b: rgba(34,197,94,0.22);
+  --amber:    #f59e0b;  --amber-bg:  rgba(245,158,11,0.10);  --amber-b: rgba(245,158,11,0.22);
+  --red:      #ef4444;  --red-bg:    rgba(239,68,68,0.10);   --red-b:   rgba(239,68,68,0.22);
+  --blue:     #3b82f6;  --blue-bg:   rgba(59,130,246,0.10);  --blue-b:  rgba(59,130,246,0.22);
+  --purple:   #a855f7;  --purple-bg: rgba(168,85,247,0.10);  --purple-b:rgba(168,85,247,0.22);
   --font: 'IBM Plex Sans', sans-serif;
   --mono: 'IBM Plex Mono', monospace;
 }
@@ -155,6 +220,11 @@ tr.slide-in td { animation: slidein .3s ease-out; }
 
 .scard { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
 .scard-title { font-size: 13px; font-weight: 600; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+.theme-swatch { border: 2px solid var(--border); border-radius: 8px; overflow: hidden; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.theme-swatch:hover { border-color: var(--border2); }
+.theme-swatch.active { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-bg); }
+.theme-preview { padding: 10px; border: 2px solid transparent; border-radius: 6px; }
+.theme-label { font-size: 11px; font-weight: 500; color: var(--text2); text-align: center; padding: 6px 4px; background: var(--bg3); }
 .scard-title .icon { width: 20px; height: 20px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0; }
 .icon.blue   { background: var(--blue-bg);   color: var(--blue);  border: 1px solid var(--blue-b); }
 .icon.green  { background: var(--green-bg);  color: var(--green); border: 1px solid var(--green-b); }
@@ -245,7 +315,7 @@ select.role-sel { padding: 4px 6px; background: var(--bg4); border: 1px solid va
           <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text2);">Sessions</span>
           <div style="display:flex;align-items:center;gap:6px;">
             <div id="live-range-btns" style="display:flex;gap:4px;">
-              <button onclick="setLiveRange('today',this)"   style="padding:4px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid #2563eb;background:#eff6ff;color:#2563eb;font-family:var(--mono);">Today</button>
+              <button onclick="setLiveRange('today',this)"   style="padding:4px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--blue);background:var(--blue-bg);color:var(--blue);font-family:var(--mono);">Today</button>
               <button onclick="setLiveRange('7days',this)"   style="padding:4px 10px;border-radius:4px;font-size:11px;font-weight:500;cursor:pointer;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);font-family:var(--mono);">7 Days</button>
               <button onclick="setLiveRange('30days',this)"  style="padding:4px 10px;border-radius:4px;font-size:11px;font-weight:500;cursor:pointer;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);font-family:var(--mono);">30 Days</button>
               <button onclick="setLiveRange('all',this)"     style="padding:4px 10px;border-radius:4px;font-size:11px;font-weight:500;cursor:pointer;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);font-family:var(--mono);">All</button>
@@ -412,6 +482,54 @@ select.role-sel { padding: 4px 6px; background: var(--bg4); border: 1px solid va
         </div>
         <div class="btn-row" style="margin-top:4px;">
           <button class="btn success" onclick="addManualCamera()">Add camera</button>
+        </div>
+      </div>
+
+      <!-- Appearance -->
+      <div class="scard">
+        <div class="scard-title"><span class="icon blue">◐</span> Appearance</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:14px;">Choose a colour scheme. Your preference is saved in the browser.</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;" id="theme-grid">
+          <div class="theme-swatch active" data-theme="alta-light" onclick="setTheme('alta-light')">
+            <div class="theme-preview" style="background:#f0f4f7;border-color:#00b5cc40;">
+              <div style="background:#ffffff;border-radius:3px;height:14px;margin-bottom:4px;border:1px solid #0028501a;"></div>
+              <div style="display:flex;gap:3px;">
+                <div style="background:#00b5cc;border-radius:2px;height:8px;flex:1;opacity:.7;"></div>
+                <div style="background:#00b5cc;border-radius:2px;height:8px;flex:2;opacity:.4;"></div>
+              </div>
+            </div>
+            <div class="theme-label">Alta Light</div>
+          </div>
+          <div class="theme-swatch" data-theme="alta-dark" onclick="setTheme('alta-dark')">
+            <div class="theme-preview" style="background:#0d1920;border-color:#00b5cc33;">
+              <div style="background:#112230;border-radius:3px;height:14px;margin-bottom:4px;border:1px solid #00b5cc1f;"></div>
+              <div style="display:flex;gap:3px;">
+                <div style="background:#00b5cc;border-radius:2px;height:8px;flex:1;opacity:.8;"></div>
+                <div style="background:#00b5cc;border-radius:2px;height:8px;flex:2;opacity:.4;"></div>
+              </div>
+            </div>
+            <div class="theme-label">Alta Dark</div>
+          </div>
+          <div class="theme-swatch" data-theme="classic-light" onclick="setTheme('classic-light')">
+            <div class="theme-preview" style="background:#f5f5f4;border-color:#00000014;">
+              <div style="background:#ffffff;border-radius:3px;height:14px;margin-bottom:4px;border:1px solid #00000014;"></div>
+              <div style="display:flex;gap:3px;">
+                <div style="background:#2563eb;border-radius:2px;height:8px;flex:1;opacity:.7;"></div>
+                <div style="background:#2563eb;border-radius:2px;height:8px;flex:2;opacity:.3;"></div>
+              </div>
+            </div>
+            <div class="theme-label">Classic Light</div>
+          </div>
+          <div class="theme-swatch" data-theme="classic-dark" onclick="setTheme('classic-dark')">
+            <div class="theme-preview" style="background:#0e0f11;border-color:#ffffff12;">
+              <div style="background:#161719;border-radius:3px;height:14px;margin-bottom:4px;border:1px solid #ffffff12;"></div>
+              <div style="display:flex;gap:3px;">
+                <div style="background:#3b82f6;border-radius:2px;height:8px;flex:1;opacity:.8;"></div>
+                <div style="background:#3b82f6;border-radius:2px;height:8px;flex:2;opacity:.4;"></div>
+              </div>
+            </div>
+            <div class="theme-label">Classic Dark</div>
+          </div>
         </div>
       </div>
 
@@ -962,6 +1080,28 @@ function fmtTime(d) {
   return new Date(d).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 }
 function fmtDur(mins) { const m=Math.abs(Math.round(mins)); return m>=60?`${Math.floor(m/60)}h${m%60}m`:`${m}m`; }
+
+// ── Theme ─────────────────────────────────────────────────────────────────────
+function setTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('lpr-theme', theme);
+  // Update swatch active state
+  document.querySelectorAll('.theme-swatch').forEach(s => {
+    s.classList.toggle('active', s.dataset.theme === theme);
+  });
+}
+
+// Load saved theme on boot
+(function() {
+  const saved = localStorage.getItem('lpr-theme') || 'alta-light';
+  document.documentElement.setAttribute('data-theme', saved);
+  // Swatches may not exist yet at this point — mark them once DOM is ready
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.theme-swatch').forEach(s => {
+      s.classList.toggle('active', s.dataset.theme === saved);
+    });
+  });
+})();
 
 // Populate webhook URL from current page location
 document.getElementById('webhook-url-display').textContent = `${location.protocol}//${location.hostname}:${location.port||3000}/webhook/lpr`;
