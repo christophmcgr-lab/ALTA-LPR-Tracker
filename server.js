@@ -445,10 +445,32 @@ function processLPREvent({ plate, camera_id, timestamp, rawTime = null, tzOffset
   const ts = (timestamp instanceof Date && !isNaN(timestamp)) ? timestamp : (timestamp ? new Date(timestamp) : new Date());
   stmts.insertEvent.run({ plate, camera_id: resolvedCameraId, role: cam.role, confidence, ts: ts.toISOString(), raw: rawJson });
 
-  if (cam.role === 'entry') {
+  // ── Determine effective role for this read ───────────────────────────────────
+  // 'both' cameras toggle: first read = entry, second read = exit.
+  // Debounce: ignore a second read on a 'both' camera within 5 seconds of the
+  // first — this prevents duplicate LPR fires from the same pass-through
+  // being treated as an immediate entry+exit pair.
+  let effectiveRole = cam.role;
+  if (cam.role === 'both') {
     const existing = activeCache.get(plate);
     if (existing) {
-      console.log(`[LPR] ${plate} re-read at entry (already on site)`);
+      const secondsSinceEntry = existing.entryTime ? (ts - existing.entryTime) / 1000 : Infinity;
+      if (secondsSinceEntry < 5) {
+        console.log(`[LPR] ${plate} debounced on ${cam.label} — only ${secondsSinceEntry.toFixed(1)}s since entry, ignoring`);
+        return { ok: true, plate, role: 'debounced', skipped: true };
+      }
+      effectiveRole = 'exit';
+    } else {
+      effectiveRole = 'entry';
+    }
+    console.log(`[LPR] ${plate} on both-direction camera ${cam.label} → treating as ${effectiveRole}`);
+  }
+
+  if (effectiveRole === 'entry') {
+    const existing = activeCache.get(plate);
+    if (existing) {
+      // Already on site from a different entry — log duplicate, don't reset timer
+      console.log(`[LPR] ${plate} re-read at entry (already on site since ${existing.entryTime})`);
       push('lpr_read', { plate, role: 'entry', camera: cam.label, duplicate: true, ts: ts.toISOString() });
     } else {
       const session = { plate, entryTime: ts, exitTime: null, entryCamera: resolvedCameraId, exitCamera: null, status: 'active', alertedWarning: false, alertedViolation: false, _entryTzOffset: tzOffset, _exitTzOffset: null, _entryRawTime: rawTime, _exitRawTime: null };
@@ -457,7 +479,7 @@ function processLPREvent({ plate, camera_id, timestamp, rawTime = null, tzOffset
       console.log(`[LPR] ✅ ${plate} ENTERED via ${cam.label}`);
       push('session_update', sessionForWire(session));
     }
-  } else if (cam.role === 'exit') {
+  } else if (effectiveRole === 'exit') {
     const session = activeCache.get(plate);
     if (session) {
       session.exitTime = ts; session.exitCamera = resolvedCameraId; session.status = 'complete'; session._exitTzOffset = tzOffset; session._exitRawTime = rawTime;
@@ -465,16 +487,18 @@ function processLPREvent({ plate, camera_id, timestamp, rawTime = null, tzOffset
       activeCache.delete(plate);
       const mins = dwellMinutes(session);
       const over = mins > CONFIG.maxDwellMinutes;
-      console.log(`[LPR] 🚗 ${plate} EXITED — ${fmtDuration(mins)} ${over ? '⚠️ EXCEEDED' : '✅'}`);
+      console.log(`[LPR] 🚗 ${plate} EXITED via ${cam.label} — ${fmtDuration(mins)} ${over ? '⚠️ EXCEEDED' : '✅'}`);
       push('session_update', sessionForWire(session));
       if (over) notify('violation', session);
     } else {
+      // Exit read with no matching entry — record it but mark entry as unknown
       const session = { plate, entryTime: null, exitTime: ts, entryCamera: null, exitCamera: resolvedCameraId, status: 'complete', alertedWarning: false, alertedViolation: false, _entryTzOffset: null, _exitTzOffset: tzOffset, _entryRawTime: null, _exitRawTime: rawTime };
       stmts.upsertSession.run(sessionToRow(session));
+      console.log(`[LPR] ${plate} exited via ${cam.label} (no matching entry)`);
       push('session_update', sessionForWire(session));
     }
   }
-  return { ok: true, plate, role: cam.role };
+  return { ok: true, plate, role: effectiveRole };
 }
 
 // ── Background violation checker ──────────────────────────────────────────────
