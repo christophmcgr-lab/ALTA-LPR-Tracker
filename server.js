@@ -117,7 +117,7 @@ db.exec(`
 `);
 
 // Migrate existing DB — add snapshot_url column if not present (safe to run every boot)
-try { db.run('ALTER TABLE sessions ADD COLUMN snapshot_url TEXT'); } catch(_) {}
+try { db.exec('ALTER TABLE sessions ADD COLUMN snapshot_url TEXT'); } catch(_) { /* column already exists */ }
 
 // ── Prepared statements ───────────────────────────────────────────────────────
 const stmts = {
