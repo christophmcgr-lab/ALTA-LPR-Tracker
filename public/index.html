@@ -584,6 +584,7 @@ function renderTable() {
   const rangeLabel = {today:'today',    '7days':'the last 7 days', '30days':'the last 30 days', all:'any time'}[liveRange];
   if (!rows.length) { wrap.innerHTML = `<div class="empty"><div class="empty-icon">🚗</div>No sessions for ${rangeLabel}.</div>`; return; }
   const now = Date.now();
+  const hasAnySnapshot = rows.some(s => s.snapshotUrl);
   const tbody = rows.map(s => {
     const mins = s.status === 'complete'
       ? (s.exitTime && s.entryTime ? (new Date(s.exitTime)-new Date(s.entryTime))/60000 : 0)
@@ -598,9 +599,10 @@ function renderTable() {
       <td><div class="dwell-cell"><div class="dwell-bar"><div class="dwell-fill" style="width:${pct}%;background:${fill}"></div></div><span class="dwell-time">${fmtDur(mins)}</span></div></td>
       <td><span class="badge ${s.status}">${s.status}</span></td>
       <td style="font-size:11px;color:var(--text3);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${cam?.label||s.entryCamera||'—'}</td>
+      ${hasAnySnapshot ? `<td>${s.snapshotUrl ? `<a href="${s.snapshotUrl}" target="_blank" rel="noopener" style="font-size:11px;color:var(--blue);text-decoration:none;display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border:1px solid var(--blue-b);border-radius:4px;background:var(--blue-bg);white-space:nowrap;">▶ View</a>` : '<span style="color:var(--text3);font-size:11px;">—</span>'}</td>` : ''}
     </tr>`;
   }).join('');
-  wrap.innerHTML = `<table><thead><tr><th>Plate</th><th>Entry</th><th>Exit</th><th>Dwell</th><th>Status</th><th>Camera</th></tr></thead><tbody>${tbody}</tbody></table>`;
+  wrap.innerHTML = `<table><thead><tr><th>Plate</th><th>Entry</th><th>Exit</th><th>Dwell</th><th>Status</th><th>Camera</th>${hasAnySnapshot ? '<th>Playback</th>' : ''}</tr></thead><tbody>${tbody}</tbody></table>`;
 }
 
 function renderStats() {
