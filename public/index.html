@@ -160,6 +160,16 @@ tr.slide-in td { animation: slidein .3s ease-out; }
 @keyframes badgepulse { 0%,100%{opacity:1} 50%{opacity:.55} }
 
 .dwell-cell { display: flex; align-items: center; gap: 7px; }
+.search-input { padding: 4px 10px 4px 28px; border: 1px solid var(--border2); border-radius: 4px; font-size: 12px; font-family: var(--font); background: var(--bg3); color: var(--text); width: 160px; outline: none; transition: border-color .15s, width .2s; }
+.search-input:focus { border-color: var(--blue); width: 200px; }
+.search-wrap { position: relative; display: flex; align-items: center; }
+.search-icon { position: absolute; left: 8px; font-size: 11px; color: var(--text3); pointer-events: none; }
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+th.sortable:hover { color: var(--text); }
+th.sortable .sort-arrow { display: inline-block; margin-left: 3px; opacity: .35; font-size: 9px; }
+th.sortable.asc .sort-arrow::after  { content: '▲'; opacity: 1; }
+th.sortable.desc .sort-arrow::after { content: '▼'; opacity: 1; }
+th.sortable:not(.asc):not(.desc) .sort-arrow::after { content: '⇅'; }
 .dwell-bar  { width: 56px; height: 4px; background: var(--bg4); border-radius: 99px; overflow: hidden; flex-shrink: 0; }
 .dwell-fill { height: 100%; border-radius: 99px; transition: width 1s linear, background .5s; }
 .dwell-time { font-family: var(--mono); font-size: 11px; color: var(--text2); white-space: nowrap; }
@@ -311,8 +321,14 @@ select.role-sel { padding: 4px 6px; background: var(--bg4); border: 1px solid va
         <div class="stat"><div class="stat-lbl">Completed</div><div class="stat-val green" id="s-done">0</div></div>
       </div>
       <div class="tcard">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);flex-shrink:0;">
-          <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text2);">Sessions</span>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);flex-shrink:0;gap:8px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text2);">Sessions</span>
+            <div class="search-wrap">
+              <span class="search-icon">&#128269;</span>
+              <input class="search-input" type="text" id="plate-search" placeholder="Search plate…" oninput="renderTable()" onkeydown="if(event.key==='Escape'){this.value='';renderTable();}">
+            </div>
+          </div>
           <div style="display:flex;align-items:center;gap:6px;">
             <div id="live-range-btns" style="display:flex;gap:4px;">
               <button onclick="setLiveRange('today',this)"   style="padding:4px 10px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid var(--blue);background:var(--blue-bg);color:var(--blue);font-family:var(--mono);">Today</button>
@@ -581,6 +597,8 @@ select.role-sel { padding: 4px 6px; background: var(--bg4); border: 1px solid va
 // ── State ─────────────────────────────────────────────────────────────────────
 let sessions = {}, cameras = {}, maxDwell = 60, alerts = [];
 let liveRange = 'today'; // 'today' | '7days' | '30days' | 'all'
+let sortCol = 'status'; // 'status' | 'entry' | 'exit' | 'dwell' | 'plate'
+let sortDir = 'asc';    // 'asc' | 'desc'
 let altaConnected = false;
 let reportRange = '7 days';
 let discoveredCameras = []; // from Alta API
@@ -691,27 +709,84 @@ function filterSessionsByRange(allSessions) {
   });
 }
 
+function sortRows(rows) {
+  const dir = sortDir === 'asc' ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    if (sortCol === 'status') {
+      const o = {violation:0, warning:1, active:2, complete:3};
+      const sd = (o[a.status] ?? 9) - (o[b.status] ?? 9);
+      if (sd !== 0) return sd; // always put violations/warnings first regardless of dir
+      return (new Date(b.entryTime||0) - new Date(a.entryTime||0));
+    }
+    if (sortCol === 'entry') {
+      return dir * (new Date(a.entryTime||0) - new Date(b.entryTime||0));
+    }
+    if (sortCol === 'exit') {
+      return dir * (new Date(a.exitTime||0) - new Date(b.exitTime||0));
+    }
+    if (sortCol === 'dwell') {
+      const now = Date.now();
+      const da = a.exitTime && a.entryTime ? new Date(a.exitTime)-new Date(a.entryTime) : (a.entryTime ? now-new Date(a.entryTime) : 0);
+      const db2 = b.exitTime && b.entryTime ? new Date(b.exitTime)-new Date(b.entryTime) : (b.entryTime ? now-new Date(b.entryTime) : 0);
+      return dir * (da - db2);
+    }
+    if (sortCol === 'plate') {
+      return dir * a.plate.localeCompare(b.plate);
+    }
+    return 0;
+  });
+}
+
+function setSort(col) {
+  if (sortCol === col) {
+    sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    sortCol = col;
+    sortDir = col === 'status' ? 'asc' : 'desc'; // default desc for times/dwell
+  }
+  renderTable();
+}
+
+function thClass(col) {
+  if (sortCol !== col) return '';
+  return sortDir;
+}
+
 function renderTable() {
   const wrap = document.getElementById('table-wrap');
-  const filtered = filterSessionsByRange(Object.values(sessions));
-  const rows = filtered.sort((a,b) => {
-    const o = {violation:0,warning:1,active:2,complete:3};
-    if (o[a.status] !== o[b.status]) return o[a.status]-o[b.status];
-    return new Date(b.entryTime||0) - new Date(a.entryTime||0);
-  });
-  const rangeLabel = {today:'today',    '7days':'the last 7 days', '30days':'the last 30 days', all:'any time'}[liveRange];
-  if (!rows.length) { wrap.innerHTML = `<div class="empty"><div class="empty-icon">🚗</div>No sessions for ${rangeLabel}.</div>`; return; }
+  const search = (document.getElementById('plate-search')?.value || '').toUpperCase().trim();
+
+  // Filter by time range then by plate search
+  let filtered = filterSessionsByRange(Object.values(sessions));
+  if (search) filtered = filtered.filter(s => s.plate.includes(search));
+
+  const rows = sortRows(filtered);
+  const rangeLabel = {today:'today', '7days':'the last 7 days', '30days':'the last 30 days', all:'any time'}[liveRange];
+
+  if (!rows.length) {
+    wrap.innerHTML = `<div class="empty"><div class="empty-icon">🚗</div>${search ? `No plates matching "<strong>${search}</strong>"` : `No sessions for ${rangeLabel}.`}</div>`;
+    return;
+  }
+
   const now = Date.now();
   const hasAnySnapshot = rows.some(s => s.snapshotUrl);
+
+  const thBtn = (col, label) =>
+    `<th class="sortable ${thClass(col)}" onclick="setSort('${col}')">${label}<span class="sort-arrow"></span></th>`;
+
   const tbody = rows.map(s => {
     const mins = s.status === 'complete'
       ? (s.exitTime && s.entryTime ? (new Date(s.exitTime)-new Date(s.entryTime))/60000 : 0)
       : (s.entryTime ? (now-new Date(s.entryTime))/60000 : 0);
-    const pct  = Math.min((mins/maxDwell)*100,100);
-    const fill = pct>=100?'var(--red)':pct>=80?'var(--amber)':'var(--green)';
+    const pct  = Math.min((mins/maxDwell)*100, 100);
+    const fill = pct>=100 ? 'var(--red)' : pct>=80 ? 'var(--amber)' : 'var(--green)';
     const cam  = cameras[s.entryCamera];
+    // Highlight matching search text in plate
+    const plateDisplay = search && s.plate.includes(search)
+      ? s.plate.replace(search, `<mark style="background:var(--amber-bg);color:var(--amber);border-radius:2px;padding:0 1px;">${search}</mark>`)
+      : s.plate;
     return `<tr data-plate="${s.plate}">
-      <td><span class="plate">${s.plate}</span></td>
+      <td><span class="plate">${plateDisplay}</span></td>
       <td style="font-family:var(--mono);font-size:11px;color:var(--text2)">${fmtTime(s.entryTime)}</td>
       <td style="font-family:var(--mono);font-size:11px;color:var(--text2)">${fmtTime(s.exitTime)}</td>
       <td><div class="dwell-cell"><div class="dwell-bar"><div class="dwell-fill" style="width:${pct}%;background:${fill}"></div></div><span class="dwell-time">${fmtDur(mins)}</span></div></td>
@@ -720,7 +795,19 @@ function renderTable() {
       ${hasAnySnapshot ? `<td>${s.snapshotUrl ? `<a href="${s.snapshotUrl}" target="_blank" rel="noopener" style="font-size:11px;color:var(--blue);text-decoration:none;display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border:1px solid var(--blue-b);border-radius:4px;background:var(--blue-bg);white-space:nowrap;">▶ View</a>` : '<span style="color:var(--text3);font-size:11px;">—</span>'}</td>` : ''}
     </tr>`;
   }).join('');
-  wrap.innerHTML = `<table><thead><tr><th>Plate</th><th>Entry</th><th>Exit</th><th>Dwell</th><th>Status</th><th>Camera</th>${hasAnySnapshot ? '<th>Playback</th>' : ''}</tr></thead><tbody>${tbody}</tbody></table>`;
+
+  wrap.innerHTML = `<table>
+    <thead><tr>
+      ${thBtn('plate','Plate')}
+      ${thBtn('entry','Entry')}
+      ${thBtn('exit','Exit')}
+      ${thBtn('dwell','Dwell')}
+      ${thBtn('status','Status')}
+      <th>Camera</th>
+      ${hasAnySnapshot ? '<th>Playback</th>' : ''}
+    </tr></thead>
+    <tbody>${tbody}</tbody>
+  </table>`;
 }
 
 function renderStats() {
