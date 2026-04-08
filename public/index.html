@@ -230,11 +230,7 @@ th.sortable:not(.asc):not(.desc) .sort-arrow::after { content: '⇅'; }
 
 .scard { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
 .scard-title { font-size: 13px; font-weight: 600; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
-.theme-swatch { border: 2px solid var(--border); border-radius: 8px; overflow: hidden; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
-.theme-swatch:hover { border-color: var(--border2); }
-.theme-swatch.active { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-bg); }
-.theme-preview { padding: 10px; border: 2px solid transparent; border-radius: 6px; }
-.theme-label { font-size: 11px; font-weight: 500; color: var(--text2); text-align: center; padding: 6px 4px; background: var(--bg3); }
+
 .scard-title .icon { width: 20px; height: 20px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0; }
 .icon.blue   { background: var(--blue-bg);   color: var(--blue);  border: 1px solid var(--blue-b); }
 .icon.green  { background: var(--green-bg);  color: var(--green); border: 1px solid var(--green-b); }
@@ -501,54 +497,6 @@ select.role-sel { padding: 4px 6px; background: var(--bg4); border: 1px solid va
         </div>
       </div>
 
-      <!-- Appearance -->
-      <div class="scard">
-        <div class="scard-title"><span class="icon blue">◐</span> Appearance</div>
-        <div style="font-size:12px;color:var(--text2);margin-bottom:14px;">Choose a colour scheme. Your preference is saved in the browser.</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;" id="theme-grid">
-          <div class="theme-swatch active" data-theme="alta-light" onclick="setTheme('alta-light')">
-            <div class="theme-preview" style="background:#f0f4f7;border-color:#00b5cc40;">
-              <div style="background:#ffffff;border-radius:3px;height:14px;margin-bottom:4px;border:1px solid #0028501a;"></div>
-              <div style="display:flex;gap:3px;">
-                <div style="background:#00b5cc;border-radius:2px;height:8px;flex:1;opacity:.7;"></div>
-                <div style="background:#00b5cc;border-radius:2px;height:8px;flex:2;opacity:.4;"></div>
-              </div>
-            </div>
-            <div class="theme-label">Alta Light</div>
-          </div>
-          <div class="theme-swatch" data-theme="alta-dark" onclick="setTheme('alta-dark')">
-            <div class="theme-preview" style="background:#0d1920;border-color:#00b5cc33;">
-              <div style="background:#112230;border-radius:3px;height:14px;margin-bottom:4px;border:1px solid #00b5cc1f;"></div>
-              <div style="display:flex;gap:3px;">
-                <div style="background:#00b5cc;border-radius:2px;height:8px;flex:1;opacity:.8;"></div>
-                <div style="background:#00b5cc;border-radius:2px;height:8px;flex:2;opacity:.4;"></div>
-              </div>
-            </div>
-            <div class="theme-label">Alta Dark</div>
-          </div>
-          <div class="theme-swatch" data-theme="classic-light" onclick="setTheme('classic-light')">
-            <div class="theme-preview" style="background:#f5f5f4;border-color:#00000014;">
-              <div style="background:#ffffff;border-radius:3px;height:14px;margin-bottom:4px;border:1px solid #00000014;"></div>
-              <div style="display:flex;gap:3px;">
-                <div style="background:#2563eb;border-radius:2px;height:8px;flex:1;opacity:.7;"></div>
-                <div style="background:#2563eb;border-radius:2px;height:8px;flex:2;opacity:.3;"></div>
-              </div>
-            </div>
-            <div class="theme-label">Classic Light</div>
-          </div>
-          <div class="theme-swatch" data-theme="classic-dark" onclick="setTheme('classic-dark')">
-            <div class="theme-preview" style="background:#0e0f11;border-color:#ffffff12;">
-              <div style="background:#161719;border-radius:3px;height:14px;margin-bottom:4px;border:1px solid #ffffff12;"></div>
-              <div style="display:flex;gap:3px;">
-                <div style="background:#3b82f6;border-radius:2px;height:8px;flex:1;opacity:.8;"></div>
-                <div style="background:#3b82f6;border-radius:2px;height:8px;flex:2;opacity:.4;"></div>
-              </div>
-            </div>
-            <div class="theme-label">Classic Dark</div>
-          </div>
-        </div>
-      </div>
-
       <!-- Thresholds -->
       <div class="scard">
         <div class="scard-title"><span class="icon amber">⚠</span> Alert Thresholds</div>
@@ -581,6 +529,16 @@ select.role-sel { padding: 4px 6px; background: var(--bg4); border: 1px solid va
       </div>
       <div id="cam-configured-list">
         <div class="empty" style="padding:16px 0;font-size:12px;">No cameras added yet.<br>Use discovery or add manually.</div>
+      </div>
+
+      <div style="padding-top:12px;border-top:1px solid var(--border);margin-bottom:12px;">
+        <div class="sec-title" style="margin-bottom:8px;">Colour scheme</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn" id="theme-btn-alta-light"   onclick="setTheme('alta-light')"   style="font-size:11px;flex:1;">☀ Alta Light</button>
+          <button class="btn" id="theme-btn-alta-dark"    onclick="setTheme('alta-dark')"    style="font-size:11px;flex:1;">☾ Alta Dark</button>
+          <button class="btn" id="theme-btn-classic-light" onclick="setTheme('classic-light')" style="font-size:11px;flex:1;">☀ Classic Light</button>
+          <button class="btn" id="theme-btn-classic-dark"  onclick="setTheme('classic-dark')"  style="font-size:11px;flex:1;">☾ Classic Dark</button>
+        </div>
       </div>
 
       <div style="margin-top:auto;padding-top:12px;border-top:1px solid var(--border);">
@@ -1172,9 +1130,18 @@ function fmtDur(mins) { const m=Math.abs(Math.round(mins)); return m>=60?`${Math
 function setTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
   localStorage.setItem('lpr-theme', theme);
-  // Update swatch active state
-  document.querySelectorAll('.theme-swatch').forEach(s => {
-    s.classList.toggle('active', s.dataset.theme === theme);
+  updateThemeButtons(theme);
+}
+
+function updateThemeButtons(theme) {
+  ['alta-light','alta-dark','classic-light','classic-dark'].forEach(t => {
+    const btn = document.getElementById('theme-btn-' + t);
+    if (!btn) return;
+    const active = t === theme;
+    btn.style.borderColor  = active ? 'var(--blue)' : 'var(--border2)';
+    btn.style.background   = active ? 'var(--blue-bg)' : 'var(--bg3)';
+    btn.style.color        = active ? 'var(--blue)' : 'var(--text2)';
+    btn.style.fontWeight   = active ? '600' : '400';
   });
 }
 
@@ -1182,12 +1149,7 @@ function setTheme(theme) {
 (function() {
   const saved = localStorage.getItem('lpr-theme') || 'alta-light';
   document.documentElement.setAttribute('data-theme', saved);
-  // Swatches may not exist yet at this point — mark them once DOM is ready
-  document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('.theme-swatch').forEach(s => {
-      s.classList.toggle('active', s.dataset.theme === saved);
-    });
-  });
+  document.addEventListener('DOMContentLoaded', () => updateThemeButtons(saved));
 })();
 
 // Populate webhook URL from current page location
