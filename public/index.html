@@ -287,7 +287,12 @@ select.role-sel { padding: 4px 6px; background: var(--bg4); border: 1px solid va
 <!-- ── Header ── -->
 <header class="header">
   <div style="display:flex;align-items:center;gap:14px;">
-    <div class="logo"><span class="live-dot"></span>LPR / DWELL_TRACKER</div>
+    <div class="logo" style="display:flex;align-items:center;gap:10px;">
+      <img src="https://www.sektor.com.au/userfiles/images/logo.svg" alt="Sektor" style="height:22px;width:auto;" onerror="this.style.display='none'">
+      <span style="color:var(--text3);font-size:11px;">|</span>
+      <span style="font-size:13px;font-weight:600;font-family:var(--mono);">Parking Violation Tool</span>
+      <span class="live-dot"></span>
+    </div>
     <div class="tabs">
       <button class="tab active" onclick="switchTab('live')">Live</button>
       <button class="tab" onclick="switchTab('reports')">Reports</button>
@@ -702,8 +707,11 @@ function setLiveRange(range, btn) {
 function filterSessionsByRange(allSessions) {
   const now = new Date();
   return allSessions.filter(s => {
-    const t = s.entryTime ? new Date(s.entryTime) : (s.exitTime ? new Date(s.exitTime) : null);
-    if (!t) return liveRange === 'all';
+    // Use UTC timestamps for filtering — entryTime is a display string now
+    const t = s.entryTimeUTC ? new Date(s.entryTimeUTC)
+            : s.exitTimeUTC  ? new Date(s.exitTimeUTC)
+            : null;
+    if (!t || isNaN(t)) return liveRange === 'all';
     if (liveRange === 'today') {
       return t.toDateString() === now.toDateString();
     } else if (liveRange === '7days') {
@@ -711,7 +719,7 @@ function filterSessionsByRange(allSessions) {
     } else if (liveRange === '30days') {
       return (now - t) <= 30 * 24 * 60 * 60 * 1000;
     }
-    return true; // 'all'
+    return true;
   });
 }
 
@@ -721,19 +729,19 @@ function sortRows(rows) {
     if (sortCol === 'status') {
       const o = {violation:0, warning:1, active:2, complete:3};
       const sd = (o[a.status] ?? 9) - (o[b.status] ?? 9);
-      if (sd !== 0) return sd; // always put violations/warnings first regardless of dir
-      return (new Date(b.entryTime||0) - new Date(a.entryTime||0));
+      if (sd !== 0) return sd;
+      return (new Date(b.entryTimeUTC||0) - new Date(a.entryTimeUTC||0));
     }
     if (sortCol === 'entry') {
-      return dir * (new Date(a.entryTime||0) - new Date(b.entryTime||0));
+      return dir * (new Date(a.entryTimeUTC||0) - new Date(b.entryTimeUTC||0));
     }
     if (sortCol === 'exit') {
-      return dir * (new Date(a.exitTime||0) - new Date(b.exitTime||0));
+      return dir * (new Date(a.exitTimeUTC||0) - new Date(b.exitTimeUTC||0));
     }
     if (sortCol === 'dwell') {
       const now = Date.now();
-      const da = a.exitTime && a.entryTime ? new Date(a.exitTime)-new Date(a.entryTime) : (a.entryTime ? now-new Date(a.entryTime) : 0);
-      const db2 = b.exitTime && b.entryTime ? new Date(b.exitTime)-new Date(b.entryTime) : (b.entryTime ? now-new Date(b.entryTime) : 0);
+      const da = a.exitTimeUTC && a.entryTimeUTC ? new Date(a.exitTimeUTC)-new Date(a.entryTimeUTC) : (a.entryTimeUTC ? now-new Date(a.entryTimeUTC) : 0);
+      const db2 = b.exitTimeUTC && b.entryTimeUTC ? new Date(b.exitTimeUTC)-new Date(b.entryTimeUTC) : (b.entryTimeUTC ? now-new Date(b.entryTimeUTC) : 0);
       return dir * (da - db2);
     }
     if (sortCol === 'plate') {
@@ -782,8 +790,8 @@ function renderTable() {
 
   const tbody = rows.map(s => {
     const mins = s.status === 'complete'
-      ? (s.exitTime && s.entryTime ? (new Date(s.exitTime)-new Date(s.entryTime))/60000 : 0)
-      : (s.entryTime ? (now-new Date(s.entryTime))/60000 : 0);
+      ? (s.exitTimeUTC && s.entryTimeUTC ? (new Date(s.exitTimeUTC)-new Date(s.entryTimeUTC))/60000 : 0)
+      : (s.entryTimeUTC ? (now-new Date(s.entryTimeUTC))/60000 : 0);
     const pct  = Math.min((mins/maxDwell)*100, 100);
     const fill = pct>=100 ? 'var(--red)' : pct>=80 ? 'var(--amber)' : 'var(--green)';
     const cam  = cameras[s.entryCamera];
@@ -823,8 +831,8 @@ function renderStats() {
   document.getElementById('s-warn').textContent   = all.filter(s=>s.status==='warning').length;
   document.getElementById('s-viol').textContent   = all.filter(s=>s.status==='violation').length;
   // Completed count respects the time filter
-  const filtered = filterSessionsByRange(all);
-  document.getElementById('s-done').textContent   = filtered.filter(s=>s.status==='complete').length;
+  const filteredStats = filterSessionsByRange(all);
+  document.getElementById('s-done').textContent   = filteredStats.filter(s=>s.status==='complete').length;
 }
 
 function flashRow(plate) {
@@ -1188,8 +1196,8 @@ function randomPlate() {
 function exportCSV() {
   const rows = [['Plate','Entry Time','Exit Time','Dwell (min)','Status','Entry Camera','Exit Camera']];
   Object.values(sessions).forEach(s => {
-    const mins = s.entryTime ? ((s.exitTime?new Date(s.exitTime):new Date())-new Date(s.entryTime))/60000 : 0;
-    rows.push([s.plate,s.entryTime||'',s.exitTime||'',mins.toFixed(1),s.status,s.entryCamera||'',s.exitCamera||'']);
+    const mins = s.entryTimeUTC ? ((s.exitTimeUTC?new Date(s.exitTimeUTC):new Date())-new Date(s.entryTimeUTC))/60000 : 0;
+    rows.push([s.plate, s.entryTime||'', s.exitTime||'', mins.toFixed(1), s.status, s.entryCamera||'', s.exitCamera||'']);
   });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([rows.map(r=>r.map(c=>`"${c}"`).join(',')).join('\n')],{type:'text/csv'}));
