@@ -123,12 +123,14 @@ db.exec(`
     role       TEXT NOT NULL,
     label      TEXT NOT NULL,
     site       TEXT,
+    timezone   TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
 
 // Migrate existing DB — add snapshot_url column if not present (safe to run every boot)
 try { db.exec('ALTER TABLE sessions ADD COLUMN snapshot_url TEXT'); } catch(_) { /* column already exists */ }
+try { db.exec('ALTER TABLE camera_config ADD COLUMN timezone TEXT'); } catch(_) { /* column already exists */ }
 
 // ── Prepared statements ───────────────────────────────────────────────────────
 const stmts = {
@@ -155,7 +157,7 @@ const stmts = {
   getRecentAlerts:db.prepare(`SELECT * FROM alerts ORDER BY created_at DESC LIMIT 100`),
 
   // Camera config persistence
-  upsertCamera:   db.prepare(`INSERT INTO camera_config (camera_id, role, label, site, updated_at) VALUES (@camera_id,@role,@label,@site,datetime('now')) ON CONFLICT(camera_id) DO UPDATE SET role=excluded.role, label=excluded.label, site=excluded.site, updated_at=datetime('now')`),
+  upsertCamera:   db.prepare(`INSERT INTO camera_config (camera_id, role, label, site, timezone, updated_at) VALUES (@camera_id,@role,@label,@site,@timezone,datetime('now')) ON CONFLICT(camera_id) DO UPDATE SET role=excluded.role, label=excluded.label, site=excluded.site, timezone=excluded.timezone, updated_at=datetime('now')`),
   deleteCamera:   db.prepare(`DELETE FROM camera_config WHERE camera_id=?`),
   getAllCameras:  db.prepare(`SELECT * FROM camera_config ORDER BY label`),
 
@@ -235,21 +237,46 @@ function toLocalISO(date, tzOffsetMinutes) {
   const local  = new Date(date.getTime() + tzOffsetMinutes * 60000);
   return local.toISOString().replace('Z', `${sign}${hh}:${mm}`);
 }
+// Format a Date as a local time string in a given IANA timezone
+// e.g. formatInTz(new Date(), 'Australia/Sydney') → '26/03/2026, 11:23:45'
+function formatInTz(date, tz) {
+  if (!date) return null;
+  const d = date instanceof Date ? date : new Date(date);
+  if (isNaN(d)) return null;
+  try {
+    if (tz) {
+      return new Intl.DateTimeFormat('en-AU', {
+        timeZone: tz,
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hour12: false,
+      }).format(d);
+    }
+  } catch(_) {}
+  // Fallback: ISO string
+  return d.toISOString();
+}
+
 function sessionForWire(s) {
+  // Resolve timezone from the camera that recorded the entry
+  const entryCam = s.entryCamera ? CONFIG.cameras[s.entryCamera] : null;
+  const exitCam  = s.exitCamera  ? CONFIG.cameras[s.exitCamera]  : null;
+  const entryTz  = entryCam?.timezone || '';
+  const exitTz   = exitCam?.timezone  || entryCam?.timezone || '';
   return {
     ...s,
-    // Send the original Alta time string to the browser so it displays in the local timezone
-    // Fall back to toLocalISO if no raw string available (e.g. for simulated events)
-    entryTime:    s._entryRawTime || (s.entryTime ? toLocalISO(s.entryTime, s._entryTzOffset) : null),
-    exitTime:     s._exitRawTime  || (s.exitTime  ? toLocalISO(s.exitTime,  s._exitTzOffset)  : null),
+    entryTime:    s.entryTime ? formatInTz(s.entryTime, entryTz) : null,
+    exitTime:     s.exitTime  ? formatInTz(s.exitTime,  exitTz)  : null,
     dwellMinutes: dwellMinutes(s),
+    _entryTz:     entryTz,
+    _exitTz:      exitTz,
   };
 }
 
 // ── Camera config (load from DB into CONFIG.cameras on boot) ──────────────────
 function loadCamerasFromDB() {
   for (const row of stmts.getAllCameras.all()) {
-    CONFIG.cameras[row.camera_id] = { role: row.role, label: row.label, site: row.site || '' };
+    CONFIG.cameras[row.camera_id] = { role: row.role, label: row.label, site: row.site || '', timezone: row.timezone || '' };
   }
   console.log(`[DB] Loaded ${Object.keys(CONFIG.cameras).length} camera(s)`);
 }
@@ -461,7 +488,9 @@ function processLPREvent({ plate, camera_id, timestamp, rawTime = null, tzOffset
     ? camera_id
     : Object.keys(CONFIG.cameras).find(k => CONFIG.cameras[k].label?.toLowerCase() === camera_id?.toLowerCase()) || camera_id;
 
-  const ts = (timestamp instanceof Date && !isNaN(timestamp)) ? timestamp : (timestamp ? new Date(timestamp) : new Date());
+  // Always use server clock for the authoritative timestamp — Alta's time strings
+  // are unreliable (timezone ambiguity). The server clock is always accurate.
+  const ts = new Date();
   stmts.insertEvent.run({ plate, camera_id: resolvedCameraId, role: cam.role, confidence, ts: ts.toISOString(), raw: rawJson });
 
   // ── Determine effective role for this read ───────────────────────────────────
@@ -739,10 +768,10 @@ app.get('/cameras', (_req, res) => res.json(CONFIG.cameras));
 
 app.put('/cameras/:id', (req, res) => {
   const id = req.params.id;
-  const { role, label, site } = req.body;
+  const { role, label, site, timezone } = req.body;
   if (!role || !label) return res.status(400).json({ error: 'role and label required' });
-  CONFIG.cameras[id] = { role, label, site: site || '' };
-  stmts.upsertCamera.run({ camera_id: id, role, label, site: site || '' });
+  CONFIG.cameras[id] = { role, label, site: site || '', timezone: timezone || '' };
+  stmts.upsertCamera.run({ camera_id: id, role, label, site: site || '', timezone: timezone || '' });
   push('cameras_update', CONFIG.cameras);
   res.json({ ok: true });
 });
