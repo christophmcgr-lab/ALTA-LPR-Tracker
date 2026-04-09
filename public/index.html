@@ -480,6 +480,14 @@ select.role-sel { padding: 4px 6px; background: var(--bg4); border: 1px solid va
             <option value="both">Entry/Exit (toggle)</option>
           </select>
         </div>
+        <div class="form-row">
+          <span class="form-label">Timezone</span>
+          <input class="form-input mono" type="text" id="man-cam-tz" placeholder="e.g. Australia/Sydney" style="font-size:12px;">
+        </div>
+        <div style="font-size:10px;color:var(--text3);margin-bottom:8px;">
+          IANA timezone name — events display in this timezone. Leave blank for UTC.<br>
+          Examples: Australia/Sydney · Asia/Kuala_Lumpur · America/New_York · Europe/London
+        </div>
         <div class="btn-row" style="margin-top:4px;">
           <button class="btn success" onclick="addManualCamera()">Add camera</button>
         </div>
@@ -1015,29 +1023,41 @@ function renderDiscoveredCameras() {
   }).join('');
 }
 
-async function addDiscoveredCamera(id, name) {
+async function addDiscoveredCamera(id, name, site) {
   const role = cameraRoles[id] || 'entry';
+  const timezone = prompt(
+    `Timezone for "${name}"?\n\nEnter an IANA timezone name so events display in local time.\nExamples:\n  Australia/Sydney\n  Asia/Kuala_Lumpur\n  America/New_York\n  Europe/London\n\nLeave blank for UTC.`,
+    guessTimezone()
+  );
+  if (timezone === null) return; // cancelled
   const r = await fetch(`/cameras/${encodeURIComponent(id)}`, {
     method: 'PUT', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ role, label: name, site: '' }),
+    body: JSON.stringify({ role, label: name, site: site || '', timezone: timezone.trim() }),
   });
   const d = await r.json();
   if (d.ok) { renderDiscoveredCameras(); } else { alert(`Failed: ${d.error}`); }
 }
 
+function guessTimezone() {
+  // Pre-fill with the browser's own timezone as a sensible default
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch(_) { return ''; }
+}
+
 async function addManualCamera() {
-  const id    = document.getElementById('man-cam-id').value.trim();
-  const label = document.getElementById('man-cam-label').value.trim();
-  const role  = document.getElementById('man-cam-role').value;
+  const id       = document.getElementById('man-cam-id').value.trim();
+  const label    = document.getElementById('man-cam-label').value.trim();
+  const role     = document.getElementById('man-cam-role').value;
+  const timezone = document.getElementById('man-cam-tz').value.trim();
   if (!id || !label) { alert('ID and label required'); return; }
   const r = await fetch(`/cameras/${encodeURIComponent(id)}`, {
     method: 'PUT', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ role, label }),
+    body: JSON.stringify({ role, label, timezone }),
   });
   const d = await r.json();
   if (d.ok) {
-    document.getElementById('man-cam-id').value = '';
+    document.getElementById('man-cam-id').value    = '';
     document.getElementById('man-cam-label').value = '';
+    document.getElementById('man-cam-tz').value    = '';
   } else { alert(`Failed: ${d.error}`); }
 }
 
@@ -1060,6 +1080,7 @@ function renderCamerasConfigured() {
       <div style="flex:1;min-width:0;">
         <div class="cam-list-label">${c.label}</div>
         <div class="cam-list-id">${id}</div>
+        ${c.timezone ? `<div style="font-size:10px;color:var(--blue);margin-top:1px;">⏱ ${c.timezone}</div>` : ''}
       </div>
       <button class="btn danger" style="font-size:10px;padding:2px 6px;" onclick="removeCamera('${id}')">✕</button>
     </div>`).join('');
@@ -1178,23 +1199,25 @@ function exportCSV() {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtTime(d) {
+  // Times arrive from the server pre-formatted in the camera's local timezone
+  // e.g. "26/03/2026, 11:23:45" — just extract the time portion for the table
   if (!d) return '—';
-  // If it's Alta's human-readable string e.g. "Thursday, March 26, 2026 09:10:33 AEDT"
-  // extract just the time portion and timezone and display as-is
-  if (typeof d === 'string' && !d.includes('T')) {
-    // Match HH:MM:SS at end (before optional timezone)
-    const m = d.match(/(\d{2}:\d{2}:\d{2})\s*([A-Z]{2,5}|[+-]\d{2}:?\d{0,2})?\s*$/);
-    if (m) return m[1] + (m[2] ? ' ' + m[2] : '');
-  }
-  // ISO string with offset e.g. "2026-03-26T09:10:33+11:00" — extract time + offset
-  if (typeof d === 'string' && d.includes('T')) {
-    const m = d.match(/T(\d{2}:\d{2}:\d{2})([+-]\d{2}:\d{2}|Z)?/);
-    if (m) {
-      const tz = m[2] === 'Z' ? ' UTC' : (m[2] || '');
-      return m[1] + tz;
-    }
+  if (typeof d === 'string') {
+    // "26/03/2026, 11:23:45" → "11:23:45"
+    const commaIdx = d.indexOf(', ');
+    if (commaIdx !== -1) return d.slice(commaIdx + 2);
+    // Fallback: ISO string
+    const m = d.match(/T(\d{2}:\d{2}:\d{2})/);
+    if (m) return m[1];
   }
   return new Date(d).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+}
+
+function fmtDateTime(d) {
+  if (!d) return '—';
+  // Full string from server e.g. "26/03/2026, 11:23:45"
+  if (typeof d === 'string' && d.includes(', ')) return d;
+  return d;
 }
 function fmtDur(mins) { const m=Math.abs(Math.round(mins)); return m>=60?`${Math.floor(m/60)}h${m%60}m`:`${m}m`; }
 
