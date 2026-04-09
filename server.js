@@ -18,9 +18,10 @@
 
 'use strict';
 
-const express  = require('express');
-const path     = require('path');
-const Database = require('better-sqlite3');
+const express      = require('express');
+const path         = require('path');
+const Database     = require('better-sqlite3');
+const nodemailer   = require('nodemailer');
 
 const app = express();
 app.use(express.json());
@@ -54,6 +55,16 @@ const CONFIG = {
   notifications: {
     webhookUrl: null,
     console: true,
+    email: {
+      enabled:    false,
+      to:         '',
+      from:       '',
+      smtpHost:   '',
+      smtpPort:   587,
+      smtpSecure: false,
+      smtpUser:   '',
+      smtpPass:   '',
+    },
   },
 };
 
@@ -542,6 +553,60 @@ async function notify(type, session) {
   if (CONFIG.notifications.webhookUrl) {
     try { await fetch(CONFIG.notifications.webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); } catch (e) { console.error('[NOTIFY]', e.message); }
   }
+  if (type === 'violation' && CONFIG.notifications.email.enabled) {
+    sendViolationEmail(session, payload).catch(e => console.error('[EMAIL]', e.message));
+  }
+}
+
+// ── Email ─────────────────────────────────────────────────────────────────────
+async function sendViolationEmail(session, payload) {
+  const cfg = CONFIG.notifications.email;
+  if (!cfg.to || !cfg.smtpHost) return;
+
+  const transporter = nodemailer.createTransport({
+    host: cfg.smtpHost,
+    port: cfg.smtpPort || 587,
+    secure: cfg.smtpSecure,
+    auth: cfg.smtpUser ? { user: cfg.smtpUser, pass: cfg.smtpPass } : undefined,
+  });
+
+  const playbackLine = session.snapshotUrl
+    ? `<p><a href="${session.snapshotUrl}" style="background:#e03040;color:#fff;padding:8px 18px;border-radius:4px;text-decoration:none;font-weight:600;">▶ View Playback in Alta</a></p>`
+    : '';
+
+  const html = `
+    <div style="font-family:sans-serif;max-width:520px;margin:0 auto;">
+      <div style="background:#0d1920;padding:18px 24px;border-radius:8px 8px 0 0;">
+        <span style="color:#00b5cc;font-size:18px;font-weight:700;">🚨 LPR Dwell Violation</span>
+      </div>
+      <div style="border:1px solid #dde4eb;border-top:none;padding:24px;border-radius:0 0 8px 8px;">
+        <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:16px;">
+          <tr><td style="padding:6px 0;color:#4a6070;width:140px;">Plate</td>
+              <td style="padding:6px 0;font-weight:700;font-family:monospace;font-size:16px;">${session.plate}</td></tr>
+          <tr><td style="padding:6px 0;color:#4a6070;">Entry time</td>
+              <td style="padding:6px 0;">${session._entryRawTime || session.entryTime || '—'}</td></tr>
+          <tr><td style="padding:6px 0;color:#4a6070;">Dwell time</td>
+              <td style="padding:6px 0;color:#e03040;font-weight:600;">${payload.dwellMinutes} min</td></tr>
+          <tr><td style="padding:6px 0;color:#4a6070;">Limit</td>
+              <td style="padding:6px 0;">${payload.limitMinutes} min</td></tr>
+          <tr><td style="padding:6px 0;color:#4a6070;">Exceeded by</td>
+              <td style="padding:6px 0;color:#e03040;font-weight:600;">${payload.excessMinutes} min</td></tr>
+          <tr><td style="padding:6px 0;color:#4a6070;">Camera</td>
+              <td style="padding:6px 0;">${CONFIG.cameras[session.entryCamera]?.label || session.entryCamera || '—'}</td></tr>
+        </table>
+        ${playbackLine}
+        <p style="font-size:12px;color:#8ca0ae;margin-top:16px;">Sent by LPR Dwell Tracker</p>
+      </div>
+    </div>`;
+
+  await transporter.sendMail({
+    from: cfg.from || cfg.smtpUser,
+    to:   cfg.to,
+    subject: `🚨 Dwell Violation — ${session.plate} (${payload.dwellMinutes}min)`,
+    html,
+    text: `Dwell Violation\nPlate: ${session.plate}\nDwell: ${payload.dwellMinutes}min (limit ${payload.limitMinutes}min, exceeded by ${payload.excessMinutes}min)\nEntry: ${session._entryRawTime || session.entryTime}\n${session.snapshotUrl ? 'Playback: ' + session.snapshotUrl : ''}`,
+  });
+  console.log(`[EMAIL] Violation alert sent to ${cfg.to} for ${session.plate}`);
 }
 
 // ── Alta API proxy ─────────────────────────────────────────────────────────────
@@ -723,8 +788,34 @@ app.get('/reports', (req, res) => {
 app.patch('/config', (req, res) => {
   if (req.body.maxDwellMinutes) CONFIG.maxDwellMinutes = parseInt(req.body.maxDwellMinutes);
   if (req.body.warnAtPercent)   CONFIG.warnAtPercent   = parseFloat(req.body.warnAtPercent);
+  if (req.body.email) {
+    Object.assign(CONFIG.notifications.email, req.body.email);
+    CONFIG.notifications.email.enabled = !!(req.body.email.to && req.body.email.smtpHost);
+  }
   push('config_update', { maxDwellMinutes: CONFIG.maxDwellMinutes, warnAtPercent: CONFIG.warnAtPercent });
   res.json({ ok: true });
+});
+
+// Test email endpoint
+app.post('/email/test', async (req, res) => {
+  const cfg = req.body;
+  if (!cfg.to || !cfg.smtpHost) return res.status(400).json({ ok: false, error: 'to and smtpHost required' });
+  try {
+    const transporter = nodemailer.createTransport({
+      host: cfg.smtpHost, port: cfg.smtpPort || 587, secure: cfg.smtpSecure,
+      auth: cfg.smtpUser ? { user: cfg.smtpUser, pass: cfg.smtpPass } : undefined,
+    });
+    await transporter.sendMail({
+      from: cfg.from || cfg.smtpUser, to: cfg.to,
+      subject: 'LPR Dwell Tracker — test email',
+      text: 'Your email notifications are configured correctly. Violation alerts will be sent here with plate info and playback link.',
+    });
+    console.log(`[EMAIL] Test email sent to ${cfg.to}`);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[EMAIL] Test failed:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 app.post('/simulate', (req, res) => res.json(processLPREvent(req.body)));
