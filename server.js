@@ -258,15 +258,18 @@ function formatInTz(date, tz) {
 }
 
 function sessionForWire(s) {
-  // Resolve timezone from the camera that recorded the entry
   const entryCam = s.entryCamera ? CONFIG.cameras[s.entryCamera] : null;
   const exitCam  = s.exitCamera  ? CONFIG.cameras[s.exitCamera]  : null;
   const entryTz  = entryCam?.timezone || '';
   const exitTz   = exitCam?.timezone  || entryCam?.timezone || '';
   return {
     ...s,
+    // Human-readable display times in the camera's local timezone
     entryTime:    s.entryTime ? formatInTz(s.entryTime, entryTz) : null,
     exitTime:     s.exitTime  ? formatInTz(s.exitTime,  exitTz)  : null,
+    // Raw UTC ISO strings for client-side date filtering and sorting
+    entryTimeUTC: s.entryTime ? (s.entryTime instanceof Date ? s.entryTime.toISOString() : new Date(s.entryTime).toISOString()) : null,
+    exitTimeUTC:  s.exitTime  ? (s.exitTime  instanceof Date ? s.exitTime.toISOString()  : new Date(s.exitTime).toISOString())  : null,
     dwellMinutes: dwellMinutes(s),
     _entryTz:     entryTz,
     _exitTz:      exitTz,
