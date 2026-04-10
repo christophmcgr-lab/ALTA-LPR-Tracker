@@ -47,6 +47,7 @@ const CONFIG = {
   maxDwellMinutes: 60,
   warnAtPercent: 0.80,
   pollIntervalMs: 15_000,
+  sessionTimeoutHours: 8,  // auto-close sessions older than this many hours (1-24)
 
   // Camera map — populated via camera discovery UI or manually here.
   // key = Alta camera/device ID (GUID), value = { role, label }
@@ -316,7 +317,7 @@ app.get('/events', (req, res) => {
 function getSnapshot() {
   return {
     sessions:  stmts.getAllSessions.all().map(r => sessionForWire(rowToSession(r))),
-    config:    { maxDwellMinutes: CONFIG.maxDwellMinutes, warnAtPercent: CONFIG.warnAtPercent },
+    config:    { maxDwellMinutes: CONFIG.maxDwellMinutes, warnAtPercent: CONFIG.warnAtPercent, sessionTimeoutHours: CONFIG.sessionTimeoutHours },
     cameras:   CONFIG.cameras,
     altaStatus: { loggedIn: altaSession.loggedIn, baseUrl: altaSession.baseUrl, username: altaSession.username },
     timestamp: new Date().toISOString(),
@@ -552,12 +553,26 @@ function processLPREvent({ plate, camera_id, timestamp, rawTime = null, tzOffset
   return { ok: true, plate, role: effectiveRole };
 }
 
-// ── Background violation checker ──────────────────────────────────────────────
+// ── Background violation & timeout checker ────────────────────────────────────
 setInterval(() => {
   const now = new Date(), warnAt = CONFIG.maxDwellMinutes * CONFIG.warnAtPercent;
+  const timeoutMins = CONFIG.sessionTimeoutHours * 60;
+
   for (const [, s] of activeCache) {
     if (!s.entryTime) continue;
     const mins = (now - s.entryTime) / 60000;
+
+    // Auto-close sessions that exceed the session timeout
+    if (timeoutMins > 0 && mins >= timeoutMins) {
+      s.exitTime = now; s.exitCamera = 'timeout'; s.status = 'complete';
+      stmts.closeSession.run({ plate: s.plate, exit_time: now.toISOString(), exit_camera: 'timeout' });
+      activeCache.delete(s.plate);
+      console.log(`[TIMEOUT] ⏱ ${s.plate} auto-closed after ${fmtDuration(mins)} (timeout: ${CONFIG.sessionTimeoutHours}h)`);
+      push('session_update', sessionForWire(s));
+      push('alert_msg', { type: 'info', message: `⏱ ${s.plate} auto-closed after ${fmtDuration(mins)} (session timeout)`, ts: now.toISOString() });
+      continue;
+    }
+
     if (mins >= CONFIG.maxDwellMinutes && !s.alertedViolation) {
       s.alertedViolation = true; s.status = 'violation';
       stmts.markViolation.run({ plate: s.plate, entry_time: s.entryTime.toISOString() });
@@ -805,6 +820,25 @@ app.delete('/sessions/:plate', (req, res) => {
   res.json({ ok: true });
 });
 
+// Bulk delete multiple sessions by plate array
+app.post('/sessions/delete-bulk', (req, res) => {
+  const plates = (req.body.plates || []).map(p => String(p).toUpperCase().trim()).filter(Boolean);
+  if (!plates.length) return res.status(400).json({ error: 'No plates provided' });
+  const now = new Date();
+  const results = plates.map(plate => {
+    const session = activeCache.get(plate);
+    if (session) {
+      stmts.closeSession.run({ plate, exit_time: now.toISOString(), exit_camera: 'manual' });
+      session.status = 'complete'; session.exitTime = now;
+      activeCache.delete(plate);
+      push('session_update', sessionForWire(session));
+      return { plate, ok: true };
+    }
+    return { plate, ok: false, error: 'Not found' };
+  });
+  res.json({ ok: true, results });
+});
+
 // ── Reports ───────────────────────────────────────────────────────────────────
 app.get('/reports', (req, res) => {
   const range = req.query.range || '30 days';
@@ -818,13 +852,15 @@ app.get('/reports', (req, res) => {
 
 // ── Config ────────────────────────────────────────────────────────────────────
 app.patch('/config', (req, res) => {
-  if (req.body.maxDwellMinutes) CONFIG.maxDwellMinutes = parseInt(req.body.maxDwellMinutes);
-  if (req.body.warnAtPercent)   CONFIG.warnAtPercent   = parseFloat(req.body.warnAtPercent);
+  if (req.body.maxDwellMinutes)    CONFIG.maxDwellMinutes    = parseInt(req.body.maxDwellMinutes);
+  if (req.body.warnAtPercent)      CONFIG.warnAtPercent      = parseFloat(req.body.warnAtPercent);
+  if (req.body.sessionTimeoutHours !== undefined)
+    CONFIG.sessionTimeoutHours = Math.min(24, Math.max(0, parseInt(req.body.sessionTimeoutHours) || 0));
   if (req.body.email) {
     Object.assign(CONFIG.notifications.email, req.body.email);
     CONFIG.notifications.email.enabled = !!(req.body.email.to && req.body.email.smtpHost);
   }
-  push('config_update', { maxDwellMinutes: CONFIG.maxDwellMinutes, warnAtPercent: CONFIG.warnAtPercent });
+  push('config_update', { maxDwellMinutes: CONFIG.maxDwellMinutes, warnAtPercent: CONFIG.warnAtPercent, sessionTimeoutHours: CONFIG.sessionTimeoutHours });
   res.json({ ok: true });
 });
 
