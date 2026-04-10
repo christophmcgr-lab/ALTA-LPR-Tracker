@@ -321,6 +321,13 @@ select.role-sel { padding: 4px 6px; background: var(--bg4); border: 1px solid va
         <div class="stat"><div class="stat-lbl">Violations</div><div class="stat-val red"  id="s-viol">0</div></div>
         <div class="stat"><div class="stat-lbl">Completed</div><div class="stat-val green" id="s-done">0</div></div>
       </div>
+      <!-- Delete bar — shown when sessions are selected -->
+      <div id="delete-bar" style="display:none;align-items:center;gap:10px;padding:8px 14px;background:var(--red-bg);border:1px solid var(--red-b);border-radius:6px;margin-bottom:8px;flex-shrink:0;">
+        <span id="delete-bar-count" style="font-size:12px;font-weight:600;color:var(--red);flex:1;"></span>
+        <button class="btn danger" onclick="deleteSelected()" style="font-size:12px;padding:4px 14px;">Delete selected</button>
+        <button class="btn" onclick="clearSelection()" style="font-size:12px;padding:4px 10px;">Cancel</button>
+      </div>
+
       <div class="tcard">
         <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);flex-shrink:0;gap:8px;flex-wrap:wrap;">
           <div style="display:flex;align-items:center;gap:8px;">
@@ -515,6 +522,14 @@ select.role-sel { padding: 4px 6px; background: var(--bg4); border: 1px solid va
           <span class="form-label">Notify webhook</span>
           <input class="form-input mono" type="text" id="cfg-notify-url" placeholder="https://hooks.slack.com/…" style="font-size:12px;">
         </div>
+        <div class="form-row">
+          <span class="form-label">Session timeout</span>
+          <input class="form-input mono" type="number" id="cfg-timeout" value="8" min="0" max="24" style="width:70px;flex:none;">
+          <span style="font-size:12px;color:var(--text2);">hours (0 = disabled)</span>
+        </div>
+        <div style="font-size:10px;color:var(--text3);margin-bottom:10px;">
+          Auto-close any session that stays active longer than this — useful for missed exit reads. 1–24 hours, or 0 to disable.
+        </div>
         <div style="margin:12px 0 8px;font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;">Email alerts on violation</div>
         <div class="form-row">
           <span class="form-label">To address</span>
@@ -606,7 +621,7 @@ select.role-sel { padding: 4px 6px; background: var(--bg4); border: 1px solid va
 
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
-let sessions = {}, cameras = {}, maxDwell = 60, alerts = [];
+let sessions = {}, cameras = {}, maxDwell = 60, sessionTimeoutHours = 8, alerts = [];
 let liveRange = 'today'; // 'today' | '7days' | '30days' | 'all'
 let sortCol = 'status'; // 'status' | 'entry' | 'exit' | 'dwell' | 'plate'
 let sortDir = 'asc';    // 'asc' | 'desc'
@@ -635,7 +650,10 @@ function connect() {
     const d = JSON.parse(e.data);
     cameras  = d.cameras  || {};
     maxDwell = d.config?.maxDwellMinutes || maxDwell;
+    sessionTimeoutHours = d.config?.sessionTimeoutHours ?? sessionTimeoutHours;
     document.getElementById('max-dwell').value = maxDwell;
+    const toEl = document.getElementById('cfg-timeout');
+    if (toEl) toEl.value = sessionTimeoutHours;
     sessions = {};
     (d.sessions || []).forEach(s => sessions[s.plate] = s);
     if (d.altaStatus) updateAltaStatus(d.altaStatus);
@@ -660,7 +678,17 @@ function connect() {
     const d = JSON.parse(e.data);
     maxDwell = d.maxDwellMinutes;
     document.getElementById('max-dwell').value = maxDwell;
+    if (d.sessionTimeoutHours !== undefined) {
+      sessionTimeoutHours = d.sessionTimeoutHours;
+      const el = document.getElementById('cfg-timeout');
+      if (el) el.value = sessionTimeoutHours;
+    }
     renderTable();
+  });
+
+  es.addEventListener('alert_msg', e => {
+    const d = JSON.parse(e.data);
+    pushAlert(d.type || 'info', d.message);
   });
 
   es.addEventListener('cameras_update', e => {
@@ -788,6 +816,9 @@ function renderTable() {
   const thBtn = (col, label) =>
     `<th class="sortable ${thClass(col)}" onclick="setSort('${col}')">${label}<span class="sort-arrow"></span></th>`;
 
+  const allActive = rows.filter(s => ['active','warning','violation'].includes(s.status));
+  const allChecked = allActive.length > 0 && allActive.every(s => selectedPlates.has(s.plate));
+
   const tbody = rows.map(s => {
     const mins = s.status === 'complete'
       ? (s.exitTimeUTC && s.entryTimeUTC ? (new Date(s.exitTimeUTC)-new Date(s.entryTimeUTC))/60000 : 0)
@@ -799,7 +830,14 @@ function renderTable() {
     const plateDisplay = search && s.plate.includes(search)
       ? s.plate.replace(search, `<mark style="background:var(--amber-bg);color:var(--amber);border-radius:2px;padding:0 1px;">${search}</mark>`)
       : s.plate;
-    return `<tr data-plate="${s.plate}">
+    const isActive = ['active','warning','violation'].includes(s.status);
+    const isChecked = selectedPlates.has(s.plate);
+    return `<tr data-plate="${s.plate}" ${isChecked ? 'style="background:var(--blue-bg)"' : ''}>
+      <td style="padding:9px 6px 9px 12px;">
+        ${isActive
+          ? `<input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleSelect('${s.plate}',this.checked)" style="cursor:pointer;accent-color:var(--blue);">`
+          : '<span style="display:inline-block;width:14px;"></span>'}
+      </td>
       <td><span class="plate">${plateDisplay}</span></td>
       <td style="font-family:var(--mono);font-size:11px;color:var(--text2)">${fmtTime(s.entryTime)}</td>
       <td style="font-family:var(--mono);font-size:11px;color:var(--text2)">${fmtTime(s.exitTime)}</td>
@@ -812,6 +850,11 @@ function renderTable() {
 
   wrap.innerHTML = `<table>
     <thead><tr>
+      <th style="width:32px;padding:8px 6px 8px 12px;">
+        <input type="checkbox" title="Select all active" ${allChecked ? 'checked' : ''}
+          onchange="toggleSelectAll(this.checked, ${JSON.stringify(allActive.map(s=>s.plate))})"
+          style="cursor:pointer;accent-color:var(--blue);">
+      </th>
       ${thBtn('plate','Plate')}
       ${thBtn('entry','Entry')}
       ${thBtn('exit','Exit')}
@@ -851,6 +894,55 @@ function pushAlert(type, msg) {
   log.innerHTML = alerts.map(a => `<div class="alert-item ${a.type}"><div class="alert-msg">${a.msg}</div><div class="alert-time">${fmtTime(a.time)}</div></div>`).join('');
 }
 function clearAlerts() { alerts = []; document.getElementById('alert-log').innerHTML = '<div class="empty" style="padding:12px 0;">No alerts</div>'; }
+
+// ── Session selection ─────────────────────────────────────────────────────────
+let selectedPlates = new Set();
+
+function toggleSelect(plate, checked) {
+  if (checked) selectedPlates.add(plate);
+  else selectedPlates.delete(plate);
+  updateDeleteBar();
+  renderTable();
+}
+
+function toggleSelectAll(checked, plates) {
+  plates.forEach(p => checked ? selectedPlates.add(p) : selectedPlates.delete(p));
+  updateDeleteBar();
+  renderTable();
+}
+
+function clearSelection() {
+  selectedPlates.clear();
+  updateDeleteBar();
+  renderTable();
+}
+
+function updateDeleteBar() {
+  const bar = document.getElementById('delete-bar');
+  const count = document.getElementById('delete-bar-count');
+  if (selectedPlates.size > 0) {
+    bar.style.display = 'flex';
+    count.textContent = `${selectedPlates.size} session${selectedPlates.size > 1 ? 's' : ''} selected`;
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+async function deleteSelected() {
+  if (!selectedPlates.size) return;
+  const plates = [...selectedPlates];
+  const r = await fetch('/sessions/delete-bulk', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ plates }),
+  });
+  const d = await r.json();
+  if (d.ok) {
+    selectedPlates.clear();
+    updateDeleteBar();
+  } else {
+    alert('Delete failed');
+  }
+}
 
 // ── Raw webhook log ───────────────────────────────────────────────────────────
 let rawEvents = [];
@@ -1138,8 +1230,9 @@ async function saveThresholds() {
   const max  = parseInt(document.getElementById('cfg-max-dwell').value);
   const warn = parseFloat(document.getElementById('cfg-warn-pct').value) / 100;
   const email = getEmailConfig();
+  const timeout = parseInt(document.getElementById('cfg-timeout')?.value) || 0;
   await fetch('/config', { method:'PATCH', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ maxDwellMinutes: max, warnAtPercent: warn, email }) });
+    body: JSON.stringify({ maxDwellMinutes: max, warnAtPercent: warn, sessionTimeoutHours: timeout, email }) });
   document.getElementById('max-dwell').value = max;
   maxDwell = max;
   alert('Settings saved.');
